@@ -1,0 +1,1 @@
+generador.sh -d foto1.json -x 20.0 -o kafka -t tiempo -h localhost -p 9092
