@@ -3,19 +3,11 @@
     <title>Flask Static Demo</title> 
   </head> 
   <body> 
-    <script src="https://code.highcharts.com/11.4.3/highcharts.js"></script>
-    <script {{message}}></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" 
-	    integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" 
-	    crossorigin="anonymous">
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script type="text/javascript">
+	    {{js_literal|safe}}
     </script>
-    <script type="text/javascript" charset="utf-8">
-        var socket = io();
-        socket.on('connect', function() {
-        socket.emit('my event', {data: 'I\'m connected!'});
-        });
-    </script>
-    <div id="target_div" style="width:100%"; height:400px;"></div>
-  </body> 
+  <div id="target_div" style="width:100%; height:400px;"></div>
+</body> 
 </html> 
 

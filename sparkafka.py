@@ -1,72 +1,53 @@
-#
-# Licensed to the Apache Software Foundation (ASF) under one or more
-# contributor license agreements.  See the NOTICE file distributed with
-# this work for additional information regarding copyright ownership.
-# The ASF licenses this file to You under the Apache License, Version 2.0
-# (the "License"); you may not use this file except in compliance with
-# the License.  You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
-
-"""
- Consumes messages from one or more topics in Kafka and does wordcount.
- Usage: structured_kafka_wordcount.py <bootstrap-servers> <subscribe-type> <topics>
-   <bootstrap-servers> The Kafka "bootstrap.servers" configuration. A
-   comma-separated list of host:port.
-   <subscribe-type> There are three kinds of type, i.e. 'assign', 'subscribe',
-   'subscribePattern'.
-   |- <assign> Specific TopicPartitions to consume. Json string
-   |  {"topicA":[0,1],"topicB":[2,4]}.
-   |- <subscribe> The topic list to subscribe. A comma-separated list of
-   |  topics.
-   |- <subscribePattern> The pattern used to subscribe to topic(s).
-   |  Java regex string.
-   |- Only one of "assign, "subscribe" or "subscribePattern" options can be
-   |  specified for Kafka source.
-   <topics> Different value format depends on the value of 'subscribe-type'.
-
- Run the example
-    `$ bin/spark-submit examples/src/main/python/sql/streaming/structured_kafka_wordcount.py \
-    host1:port1,host2:port2 subscribe topic1,topic2`
-"""
-
 import sys
 import time
 import socketio
+import json
+import mysql.connector
+from datetime import datetime
 from pyspark import SparkContext
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
 
 def write_to_sql(df, batchID):
-    df.write\
-            .format("jdbc")\
-            .option("url","jdbc:mysql://localhost:3306/tiempo")\
-            .option("driver","com.mysql.jdbc.Driver")\
-            .option("dtable","solardata")\
-            .option("user","spark")\
-            .option("password","sparkpass")
-    print("##DEBUG##ALERT##  :Supposedly sent data to database")
-    try:
-        rows=df.toJSON().collect()
-        sio=socketio.SimpleClient()
-        sio.connect("http://localhost:5000")
-        sio.emit('NewSolarData',rows)
-    except:
-        print("Could not connect to server")
-    finally:
-        sio.disconnect()
-    print(rows)
-    
-    #db_properties={"user":"spark","password":"sparkpass"}
-    #df.write.jdbc(url="jdbc:mysql://localhost:3306/tiempo", table="solardata", driver="com.mysql.jdbc.Driver",properties=db_properties)
+    rows=df.toJSON().collect()
+    for row in rows:
+        #Fill the values that aren't present but necesary with null
+        schema=["date","Irradiance","PanelTemperature","Voltage","Intensity","Power","FarmID"]
+        formatted=json.loads(row)
+        keys=list(formatted.keys())
+        for elem in schema:
+            if elem not in keys:
+                formatted[elem]=None
+        try:
+            sio=socketio.SimpleClient()
+            sio.connect("http://localhost:5000")
+            sio.emit('NewSolarData',json.dumps(formatted))
+        except:
+            print("Could not connect to server")
+        finally:
+            sio.disconnect()
+        #Store the rows in the database, x is a dictionary with all the json fields accessible by x["field"]
+        try:
+            sql=mysql.connector.connect(user='spark',password='sparkpass',host='localhost', database='tiempo')
+            cursor=sql.cursor()
+            add_data="INSERT INTO solardata (date,Irradiance,PanelTemperature,Intensity,Voltage,Power,FarmID) VALUES(%s,%s,%s,%s,%s,%s,%s)"
+
+            data=(datetime.strptime(formatted["date"],'%Y-%m-%dT%H:%M:%S'),\
+                    str(formatted["Irradiance"]),\
+                    str(formatted["PanelTemperature"]),\
+                    str(formatted["Intensity"]),\
+                    str(formatted["Voltage"]),\
+                    str(formatted["Power"]),\
+                    str(formatted["FarmID"]))
+            cursor.execute(add_data,data)
+            sql.commit()
+        except Exception as e:
+            sql.rollback()
+            print(f"Error: {e}")
+        finally:
+            cursor.close()
+            sql.close()    
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
@@ -81,12 +62,18 @@ if __name__ == "__main__":
 
     spark = SparkSession\
         .builder\
-        .appName("StructuredKafkaWordCount")\
+        .appName("Get&FormatSolarData")\
         .getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
-    jsonSchema=StructType([ StructField("FechaHora", StringType()),StructField("G", FloatType()),StructField("Tc",FloatType()),StructField("I", FloatType()),StructField("V", FloatType()),StructField("P", FloatType()),StructField("Inst",StringType())])
+    jsonSchema=StructType([StructField("FechaHora", StringType()),\
+                           StructField("G", FloatType()),\
+                           StructField("Tc",FloatType()),\
+                           StructField("I", FloatType()),\
+                           StructField("V", FloatType()),\
+                           StructField("P", FloatType()),\
+                           StructField("Inst",StringType())\
+                         ])
 
-    
     #Create DataSet representing the stream of input lines from kafka
     datastream = spark\
         .readStream\
