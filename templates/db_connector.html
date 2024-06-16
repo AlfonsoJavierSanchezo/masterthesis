@@ -1,3 +1,60 @@
-<h1>Use the filters to ask the database about the historic data of a solar farm</h1>
-Estaría guay meter selectores para las fechas "desde" y "hasta" y para la granja solar. Por ultimo un boton de generar tabla para que se genere, obviamente
-Después de generar la tabla, debajo de ésta, volverán a aparecer los botones y nos dejará volver a generar una tabla, para poder comparar de forma rápida
+<!--Estaría guay meter selectores para las fechas "desde" y "hasta" y para la granja solar. Por ultimo un boton de generar tabla para que se genere, obviamente.Después de generar la tabla, debajo de ésta, volverán a aparecer los botones y nos dejará volver a generar una tabla, para poder comparar de forma rápida-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Input Form</title>
+    <style>
+        .radio-group {
+            margin-bottom: 15px;
+        }
+    </style>
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+</head>
+<body>
+    <h1>Insert the data for the database search</h1>
+    <form action="/database" method="POST">
+        <div class="radio-group">
+            <label>
+                <input type="radio" name="date-range" value="last-month" onclick="toggleDateSelectors(true)">
+                Last Month
+            </label><br>
+            <label>
+                <input type="radio" name="date-range" value="last-2-months" onclick="toggleDateSelectors(true)">
+                Last 2 Months
+            </label><br>
+            <label>
+                <input type="radio" name="date-range" value="" checked onclick="toggleDateSelectors(false)">
+                None
+            </label>
+        </div>
+
+        <label for="start-date">Start Date:</label>
+        <input type="date" id="start-date" name="start-date" required><br><br>
+
+        <label for="end-date">End Date:</label>
+        <input type="date" id="end-date" name="end-date" required><br><br>
+
+        <label for="options">Select a farm to filter with:</label>
+        <select id="options" name="options" required>
+	    {% for farm in farms %}
+	    <option value="{{farm}}">{{farm|safe}}</option>
+	    {% endfor %}
+        </select><br><br>
+
+        <input type="submit" value="Submit">
+    </form>
+    <div id="target_div" style="width:100%; height:400px;"></div>
+{{errormsg|safe}}
+    <script>
+        function toggleDateSelectors(disable) {
+            document.getElementById('start-date').disabled = disable;
+            document.getElementById('end-date').disabled = disable;
+        }
+    </script>
+    <script>
+	{{graph|safe}}
+    </script>
+</body>
+</html>

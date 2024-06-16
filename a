@@ -1,0 +1,10 @@
+CREATE TABLE `solardata` (
+  `ID` int NOT NULL AUTO_INCREMENT,
+  `date` DATETIME DEFAULT NULL,
+  `Irradiance` decimal(10,0) DEFAULT NULL,
+  `PanelTemperature` decimal(10,0) DEFAULT NULL,
+  `Intensity` decimal(10,0) DEFAULT NULL,
+  `Voltage` decimal(10,0) DEFAULT NULL,
+  `Power` decimal(10,0) DEFAULT NULL,
+  `FarmID` varchar(20) DEFAULT NULL,
+  PRIMARY KEY (`ID`));
