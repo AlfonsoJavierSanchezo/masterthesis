@@ -17,29 +17,63 @@ app.config['SECRET_KEY']= 'AEIOU'
 socketio=SocketIO(app)
 mywebname="http://localhost:5000/"
 
-def generateChart(df, title):
+def generateStaticChart(df, title):
     chart=Chart.from_pandas(df,
                   property_map = {
                       'x': 'date',
-                      'y': 'Voltage',
+                      'y': 'Intensity',
                       #'name': ['Intensity','Voltage','PanelTemperature','Irradiance']
                       },
                   chart_kwargs={'container': 'target_div','variable_name': 'myChart'},
                   options_kwargs={'title': {'text': title},'x_axis': {'type': 'datetime','dateTimeLabelFormats': {'day': '%e %b %Y','second': '%e %b %Y %H:%M:%S'}}}
-                  #,options_kwargs={'x_axis':{'type':'datetime','dateTimeLabelFormats':{'year':%Y}}}
                   )
-    return chart 
+    return chart.to_js_literal() 
 
-@app.route("/")
+def generateLiveChart(df, title):
+
+    config = {
+        'chart': {
+            'type': 'line',
+            'events': {
+                'load': 'requestData'  # Set the event load attribute to the requestData function
+            }
+        },
+        'title': {
+            'text': title
+        },
+        'xAxis': {
+            'type': 'datetime',
+            'title': {
+                'text': 'Datetime'
+            },
+            'dateTimeLabelFormats': {
+                        'millisecond': '%Y-%m-%d %H:%M:%S',
+                        'second': '%Y-%m-%d %H:%M:%S',
+                        'minute': '%Y-%m-%d %H:%M',
+                        'hour': '%Y-%m-%d %H:%M',
+                        'day': '%Y-%m-%d',
+                        'week': '%Y-%m-%d',
+                        'month': '%Y-%m',
+                        'year': '%Y'}
+        },
+        'yAxis': {
+            'title': {
+                'text': 'KWatts'
+            }
+        },
+        'series': [{
+            'name': title,
+            'data': df[['date', 'Power']].values.tolist()  # Convert DataFrame to list of lists
+        }]
+    }
+
+    return config
+
+@app.route("/", methods=["GET","POST"])
 def welcomePage():
-    res=""
-    if len(farmNames)==0:
-        res="No data was loaded yet, please wait"
-    else:
-        for graphs in farmNames:
-            res=res+"<a href="+mywebname+graphs+">"+graphs+"</a>"+"\n"
-    return "<h1>Click on the solar farm whose data you want to see</h1>\n\n"+res+\
-            "\n\n Or click <a href="+mywebname+"database>here</a> to search for historic data"
+    #my_chart=generateLiveChart(farms[1], "etsist2")
+    df=farms[1]
+    return render_template("day-month_view.html",farms=farmNames, data=df[['date', 'Power']].values.tolist(),title=farmNames[1])
 
 @app.route("/database", methods=["GET","POST"])
 def plotFilteredData():
@@ -71,13 +105,22 @@ def plotFilteredData():
             column_names = cursor.description
             result=[{column_names[index][0]:column for index, column in enumerate(value)} for value in cursor.fetchall()]#Mention stackoverflow?
             df=DataFrame(result)
-            my_chart=generateChart(df,'Generated chart')
-            as_js_literal=my_chart.to_js_literal()
+            as_js_literal=generateStaticChart(df,'Generated chart')
             return render_template("db_connector.html",farms=farmNames, graph=as_js_literal)
         except:
             return render_template("db_connector.html",farms=farmNames, errormsg="Could not connect to the database")
     elif request.method=='GET':
         return render_template("db_connector.html",farms=farmNames)
+
+@app.route("/newpoints")
+def getNewPoint():
+    i=0
+    ret={}
+    for farm in farms:
+        lastelem=farm.iloc[-1].to_json()
+        ret[farmNames[i]]=lastelem
+        i=i+1
+    return json.dumps(ret)
 
 @app.route("/<path:text>")
 def deliverGraphs(text):
@@ -93,6 +136,11 @@ def deliverGraphs(text):
 @app.errorhandler(404)
 def page_not_found():
     return render_template('404.html')
+
+@socketio.on('Alerts')
+def handle_alert(data):
+    #Store in the server
+    print("New alert: "+str(data))
 
 @socketio.on('NewSolarData')
 def handle_message(data):
@@ -118,6 +166,7 @@ def handle_message(data):
     except ValueError:
         #The data must have a date value, skip if it there isn't or its format is incorrect
         return
+    formatted["date"]=formatted["date"].timestamp()*1000+7200000
     try:
         index=farmNames.index(formatted["FarmID"])
         formatted.pop("FarmID")
@@ -127,8 +176,10 @@ def handle_message(data):
         farmNames.append(formatted["FarmID"])
         formatted.pop("FarmID")
         newdf=DataFrame(formatted,index=[0])
+        newdf["date"].astype('int64')
         farms.append(newdf)
         print(tabulate(newdf,headers='keys',tablefmt='psql'))
+
 
 if __name__ == '__main__':
     socketio.run(app)

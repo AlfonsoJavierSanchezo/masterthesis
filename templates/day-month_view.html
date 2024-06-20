@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Highcharts with Radio Button and Dropdown</title>
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            margin: 20px;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        #chart-container {
+            width: 100%;
+            height: 400px;
+            border: 1px solid #ccc;
+        }
+        .table-structure {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-around;
+        }
+        .table-structure div {
+            flex: 1;
+            text-align: center;
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <form class="controls" action="/" method="post">
+            <input type="radio" id="live" name="data-type" value="live" checked>
+            <label for="daily">Live data</label>
+            <input type="radio" id="monthly" name="data-type" value="monthly">
+            <label for="monthly">Monthly statistics</label>
+            <select id="options-dropdown" name="selected-option">
+	    {% for farm in farms %}
+	    <option value="{{farm}}">{{farm|safe}}</option>
+	    {% endfor %}
+            </select>
+            <button type="submit-button">Submit</button>
+        </form>
+
+        <div id="target_div"></div>
+
+        <div class="table-structure">
+            <div>
+                Performance
+		<div class="data" id="performance-data">{{Percentage}}</div>
+            </div>
+            <div>
+                Production
+		<div class="data" id="production-data">{{Power}}</div>
+            </div>
+            <div>
+                Irradiance
+		<div class="data" id="irradiance-data">{{Irradiance}}</div>
+            </div>
+            <div>
+                Cell temperature
+		<div class="data" id="cell-temperature-data">{{Temperature}}</div>
+            </div>
+            <div>
+                Voltage
+		<div class="data" id="voltage-data">{{Voltage}}</div>
+            </div>
+            <div>
+                Intensity
+		<div class="data" id="intensity-data">{{Intensity}}</div>
+            </div>
+        </div>
+      </div>
+    <script>
+	let chart;
+        function checkDropdownOptions() {
+            const dropdown = document.getElementById('options-dropdown');
+            const submitButton = document.getElementById('submit-button');
+            if (dropdown.options.length === 0) {
+                submitButton.disabled = true;
+            } else {
+                submitButton.disabled = false;
+            }
+        }
+        // Initial check when the page loads
+       async function requestData() {
+    console.log('Called the functions');
+    const result = await fetch('http://localhost:5000/newpoints');
+    if (result.ok) {
+        const data = await result.json();
+        console.log('Raw data from server:', data);
+
+        const dropdown = document.getElementById('options-dropdown');
+        const farm = dropdown.value;
+
+        // Parse the main JSON object
+        const wholeInfo = {};
+        for (const key in data) {
+            wholeInfo[key] = JSON.parse(data[key]);
+        }
+        // Retrieve and log the specific farm data
+        const farmInfo = wholeInfo[farm];
+        console.log('Parsed data for selected farm:', farmInfo);
+
+        // Check if the new point is different from the last point
+        const lastPoint = chart.series[0].data[chart.series[0].data.length - 1];
+	const newPoint = [farmInfo.date, farmInfo.Power]
+	console.log('Last point:', lastPoint);
+        if (lastPoint.x !== newPoint[0] || lastPoint.y !== newPoint[1]) {
+	    console.log('Adding new point:', newPoint);
+            chart.series[0].addPoint(newPoint, true);
+        } else {
+            console.log('New point is the same as the last point. Skipping addition.');
+        }
+        // Call it again after one second
+        setTimeout(requestData, 1000);
+    } else {
+        console.error('Failed to fetch data:', result.statusText);
+        setTimeout(requestData, 1000);
+    }
+}
+	document.addEventListener('DOMContentLoaded', function () {
+            var chartConfig = {
+        'chart': {
+            'type': 'line',
+            'events': {
+                'load': requestData   //Set the event load attribute to the requestData function
+            }
+        },
+        'title': {
+            'text': '{{title}}'
+        },
+        'xAxis': {
+            'type': 'datetime',
+            'title': {
+                'text': 'Datetime'
+            },
+            'dateTimeLabelFormats': {
+                        'millisecond': '%Y-%m-%d %H:%M:%S',
+                        'second': '%Y-%m-%d %H:%M:%S',
+                        'minute': '%Y-%m-%d %H:%M',
+                        'hour': '%Y-%m-%d %H:%M',
+                        'day': '%Y-%m-%d',
+                        'week': '%Y-%m-%d',
+                        'month': '%Y-%m',
+                        'year': '%Y'}
+        },
+        'yAxis': {
+            'title': {
+                'text': 'KWatts'
+            }
+        },
+        'series': [{
+	    'name': '{{title}}',
+	    'data': {{data}}
+        }]
+    }
+
+            chart= Highcharts.chart('target_div', chartConfig);
+        });
+	
+    </script>
+</body>
+</html>
+
