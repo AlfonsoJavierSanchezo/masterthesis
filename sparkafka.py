@@ -10,6 +10,200 @@ from pyspark.sql.functions import *
 from pyspark.sql.types import *
 from threading import Timer
 farmNames=[]
+#Aggregated data will be stored as a list of dicts with numbers
+#Keys:'PowerSum' 'IrradianceMean' 'IrradianceMax' 'IrradianceMin' 'PanelTemperatureMean' 'PanelTemperatureMax' 'PanelTemperatureMin' 
+#'IntensityMean' 'IntensityMax' 'IntensityMin' 'VoltageMean' 'VoltageMax' 'VoltageMin'
+aggrDay=[]
+aggrMonth=[]
+today=""
+thisMonth=""
+    
+def calculatePrediction(irradiance, cellTemp, farm):
+    if farm=='etsist1':
+        return (5.5*irradiance*(1-0.0035*(cellTemp-25)))/1000
+    elif farm =='etsist2':
+        return (4.8*irradiance*(1-0.0035*(cellTemp-25)))/1000
+    else: 
+        return (5.1*irradiance*(1-0.0035*(cellTemp-25)))/1000
+
+def getPowerRelation(real, prediction):
+    percentage=(prediction-real)/prediction
+    if percentage<0:
+        percentage=-percentage
+    return percentage
+
+def powerTooLow(farmID,percentage):
+    try:
+        sio=socketio.SimpleClient()
+        sio.connect("http://localhost:5000")
+        sio.emit('Alerts: Farm ',farmID+" is producing very little power")
+    except:
+        print("Error while emitting an alert")
+    try:
+        sql=mysql.connector.connect(user='spark',password='sparkpass',host='localhost', database='tiempo')
+        cursor=sql.cursor()
+        add_data="INSERT INTO alerts (Date,Severity,Description,FarmID) VALUES(%s,%s,%s,%s)"
+        data=(datetime.now(),\
+                "Warning",\
+                "Farm's power is too low",\
+                str(percentage)+"%")
+        cursor.execute(add_data,data)
+        sql.commit()
+    except:
+        sql.rollback()
+    finally:
+        sio.disconnect()
+        cursor.close()
+        sql.close()
+        print("Handled alert")
+
+def maxf(n1,n2):
+    if n1>n2:
+        return n1
+    else:
+        return n2
+
+def minf(n1,n2):
+    if n1<n2:
+        return n1
+    else:
+        return n2
+
+def dataNotStructured(farmID):
+    try:
+        sio=socketio.SimpleClient()
+        sio.connect("http://localhost:5000")
+        sio.emit('Alerts',farmID+" has sent incorrect information")
+    except:
+        print("Error while emitting an alert")
+    try:
+        sql=mysql.connector.connect(user='spark',password='sparkpass',host='localhost', database='tiempo')
+        cursor=sql.cursor()
+        add_data="INSERT INTO alerts (Date,Severity,Description,FarmID) VALUES(%s,%s,%s,%s)"
+        data=(datetime.now(),\
+                "Warning",\
+                "Farm didn't send correct information, few fields",\
+                str(farmID))
+        cursor.execute(add_data,data)
+        sql.commit()
+    except:
+        sql.rollback()
+    finally:
+        sio.disconnect()
+        cursor.close()
+        sql.close()
+        print("Handled alert")
+
+def aggregateValues(data,dayormonth):
+    #Data only contains an entry about a solar farm
+    i=0
+    global aggrDay
+    global aggrMonth
+    if dayormonth=="day":
+        farms=aggrDay
+    else:
+        farms=aggrMonth
+    for farm in farms:
+        if farm[0]==data["FarmID"]:
+            try:
+                farms[i][1]['PowerSum']=farm[1]['PowerSum']+data['Power']
+                farms[i][1]['PredictPowerSum']=farm[1]['PredictPowerSum']+data['predict_power']
+                if data['Irradiance']!=0:
+                    farms[i][1]['IrradianceMean']=farm[1]['IrradianceMean']+data['Irradiance']
+                    farms[i][1]['IrradianceMax']=maxf(farm[1]['IrradianceMax'],data['Irradiance'])
+                    farms[i][1]['IrradianceMin']=minf(farm[1]['IrradianceMin'],data['Irradiance'])
+                    farms[i][1]['NumIrr']=farm[1]['NumIrr']+1
+                if data['PanelTemperature']!=0:
+                    farms[i][1]['PanelTemperatureMean']=farm[1]['PanelTemperatureMean']+data['PanelTemperature']
+                    farms[i][1]['PanelTemperatureMax']=maxf(farm[1]['PanelTemperatureMax'],data['PanelTemperature'])
+                    farms[i][1]['PanelTemperatureMin']=minf(farm[1]['PanelTemperatureMin'],data['PanelTemperature'])
+                    farms[i][1]['NumVTemp']=farm[1]['NumTemp']+1
+                if data['Intensity']!=0:
+                    farms[i][1]['IntensityMean']=farm[1]['IntensityMean']+data['Intensity']
+                    farms[i][1]['IntensityMax']=maxf(farm[1]['IntensityMax'],data['Intensity'])
+                    farms[i][1]['IntensityMin']=minf(farm[1]['IntensityMin'],data['Intensity'])
+                    farms[i][1]['NumInt']=farm[1]['NumInt']+1
+                if data['Voltage']!=0:
+                    farms[i][1]['VoltageMean']=farm[1]['VoltageMean']+data['Voltage']
+                    farms[i][1]['VoltageMax']=maxf(farm[1]['VoltageMax'],data['Voltage'])
+                    farms[i][1]['VoltageMin']=minf(farm[1]['VoltageMin'],data['Voltage'])
+                    farms[i][1]['NumVol']=farm[1]['NumVol']+1
+                
+            except Exception as e:
+                print(f"ErrorF: "+repr(e))
+                farms[i][1]['PowerSum']=data['Power']
+                farms[i][1]['PredictPowerSum']=data['predict_power']
+                farms[i][1]['IrradianceMean']=data['Irradiance']
+                farms[i][1]['IrradianceMax']=data['Irradiance']
+                farms[i][1]['IrradianceMin']=data['Irradiance']
+                farms[i][1]['PanelTemperatureMean']=data['PanelTemperature']
+                farms[i][1]['PanelTemperatureMax']=data['PanelTemperature']
+                farms[i][1]['PanelTemperatureMin']=data['PanelTemperature']
+                farms[i][1]['IntensityMean']=data['Intensity']
+                farms[i][1]['IntensityMax']=data['Intensity']
+                farms[i][1]['IntensityMin']=data['Intensity']
+                farms[i][1]['VoltageMean']=data['Voltage']
+                farms[i][1]['VoltageMax']=data['Voltage']
+                farms[i][1]['VoltageMin']=data['Voltage']
+                farms[i][1]['NumIrr']=1
+                farms[i][1]['NumTemp']=1
+                farms[i][1]['NumInt']=1
+                farms[i][1]['NumVol']=1
+            break
+        i=i+1
+        
+def writeAggrDatabase(db_name):
+    query="INSERT INTO "+db_name+" (date,PowerSum,PredPowerSum,IrradianceMean,IrradianceMax,IrradianceMin,\
+        PanelTemperatureMean,PanelTemperatureMax,PanelTemperatureMin\
+        ,IntensityMean,IntensityMax,IntensityMin,\
+        VoltageMean,VoltageMax,VoltageMin,FarmID)\
+        VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+    global aggrMonth
+    global aggrDay
+    if db_name=="aggregated_month":
+        farms=aggrMonth
+        date=thisMonth
+    else:
+        print("day")
+        farms=aggrDay
+        date=today
+    try:
+        sql=mysql.connector.connect(user='spark',password='sparkpass',host='localhost', database='tiempo')
+        cursor=sql.cursor()
+        i=0
+        for farm in farms:
+            print(farms[i][0])
+            print(farms[i][1])
+            args=[
+                str(date),
+                str(farms[i][1]['PowerSum']),
+                str(farms[i][1]['PredictPowerSum']),
+                str(farms[i][1]['IrradianceMean']/farm[1]['NumIrr']),
+                str(farms[i][1]['IrradianceMax']),
+                str(farms[i][1]['IrradianceMin']),
+                str(farms[i][1]['PanelTemperatureMean']/farm[1]['NumTemp']),
+                str(farms[i][1]['PanelTemperatureMax']),
+                str(farms[i][1]['PanelTemperatureMin']),
+                str(farms[i][1]['IntensityMean']/farm[1]['NumInt']),
+                str(farms[i][1]['IntensityMax']),
+                str(farms[i][1]['IntensityMin']),
+                str(farms[i][1]['VoltageMean']/farm[1]['NumVol']),
+                str(farms[i][1]['VoltageMax']),
+                str(farms[i][1]['VoltageMin']),
+                farms[i][0]
+                ]
+            
+            print("Executing query")
+            cursor.execute(query,args)
+            print(cursor.statement)
+            i=i+1
+    except Exception as e:
+        print(f"ErrorF: "+repr(e))
+        sql.rollback()
+    finally:
+        sql.commit()
+        cursor.close()
+        sql.close()
 
 def idleAlert(farmID):
     try:
@@ -25,44 +219,69 @@ def idleAlert(farmID):
         data=(datetime.now(),\
                 "Warning",\
                 "Farm did not send information in an hour now",\
-                str(formatted["FarmID"]))
+                farmID)
+        print("Saving Alert")
         cursor.execute(add_data,data)
         sql.commit()
     except:
         sql.rollback()
     finally:
+        print("Saving Alert")
         sio.disconnect()
         cursor.close()
         sql.close()
         print("Handled alert")
 
-def write_to_sql(df, batchID):#The idle alert does not work yet
+def write_to_sql(df, batchID):
     rows=df.toJSON().collect()
     for row in rows:
         #Fill the values that aren't present but necesary with null
         schema=["date","Irradiance","PanelTemperature","Voltage","Intensity","Power","FarmID"]
         formatted=json.loads(row)
+        print(formatted)
         keys=list(formatted.keys())
+        global today
+        global thisMonth
+        global aggrDay
+        global aggrMonth
+        if today=="":
+            today=datetime.strptime(formatted["date"],'%Y-%m-%dT%H:%M:%S').date()
+            print(today)
+            thisMonth=today
         global farmNames
+        alert=False
         for elem in schema:
             if elem not in keys:
-                formatted[elem]=None
-        if len(farmNames)==0:
-            #ONLY FOR TESTING, WE NEED TO CHANGE "etisst3" BY formatted["farmID"]
-            #farmNames.append(["etsist3",Timer(30,idleAlert,["etsist3"]).start()])
-        else:
-            newelem=True
-            i=0
-            for pair in farmNames:
-                if farmNames[i][0]==formatted["FarmID"]:
-                    if farmNames[i][1]!= None:
-                        farmNames[i][1].cancel()
-                    farmNames[i][1]=Timer(3600.0,idleAlert,formatted["FarmID"]).start()
-                    newelem=False
-                    break
-                i=i+1
-            if newelem:
-                farmNames.append([formatted["FarmID"],Timer(3600,idleAlert,[formatted["FarmID"]]).start()])
+                #If there's a element not defined, send alert and skip
+                alert=True
+                break
+        if alert:
+            dataNotStructured(formatted["FarmID"])
+            continue
+        try:
+            formatted['predict_power']=calculatePrediction(formatted['Irradiance'],formatted['PanelTemperature'],formatted['FarmID'])
+            print(formatted['predict_power'])
+        except:
+            formatted['predict_power']=0
+        #If we're at night, the power might be too low to take correct predictions and send alarms
+        if formatted['Power']>0.2:
+            perc=getPowerRelation(formatted['Power'],formatted['predict_power'])
+            if perc<0.25:
+                powerTooLow(formatted['FarmID'],perc)
+        newelem=True
+        i=0
+        for pair in farmNames:#Setup of timers
+            if farmNames[i][0]==formatted["FarmID"]:
+                if farmNames[i][1]!= None:
+                    farmNames[i][1].cancel()
+                farmNames[i][1]=Timer(3600.0,idleAlert,[formatted["FarmID"]]).start()
+                newelem=False
+                break
+            i=i+1
+        if newelem:
+            aggrDay.append([formatted["FarmID"],{}])
+            aggrMonth.append([formatted["FarmID"],{}])
+            farmNames.append([formatted["FarmID"],Timer(3600,idleAlert,[formatted["FarmID"]]).start()])
 
         try:
             sio=socketio.SimpleClient()
@@ -72,21 +291,44 @@ def write_to_sql(df, batchID):#The idle alert does not work yet
             print("Could not connect to server")
         finally:
             sio.disconnect()
-        #Store the rows in the database, x is a dictionary with all the json fields accessible by x["field"]
+        #Store the rows in the database, 'formatted' is a dictionary with all the json fields accessible by formatted["field"]
         try:
             sql=mysql.connector.connect(user='spark',password='sparkpass',host='localhost', database='tiempo')
             cursor=sql.cursor()
-            add_data="INSERT INTO solardata (date,Irradiance,PanelTemperature,Intensity,Voltage,Power,FarmID) VALUES(%s,%s,%s,%s,%s,%s,%s)"
-
-            data=(datetime.strptime(formatted["date"],'%Y-%m-%dT%H:%M:%S'),\
+            add_data="INSERT INTO solardata (date,Irradiance,PanelTemperature,Intensity,Voltage,Power, predict_power,FarmID) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)"
+            now=datetime.strptime(formatted["date"],'%Y-%m-%dT%H:%M:%S')
+            data=(now,\
                     str(formatted["Irradiance"]),\
                     str(formatted["PanelTemperature"]),\
                     str(formatted["Intensity"]),\
                     str(formatted["Voltage"]),\
                     str(formatted["Power"]),\
+                    str(formatted["predict_power"]),\
                     str(formatted["FarmID"]))
             cursor.execute(add_data,data)
             sql.commit()
+            now=now.date()
+            if today != now:
+                #If a day passed, reset the aggregated data and store them in the database
+                writeAggrDatabase('aggregated_day')
+                print(today)
+                today=now
+                print(today)
+                i=0
+                for dicts in aggrDay:
+                    aggrDay[i]=[aggrDay[i][1],{}]
+                    i=i+1
+                if now.month!=thisMonth.month:
+                    writeAggrDatabase('aggregated_month')
+                    thisMonth=now
+                    for dicts in aggrMonth:
+                        aggrMonth[i]=[farmNames[i],{}]
+                        i=i+1
+            #If the day didn't pass yet, continue calculating the aggregated values
+            else:
+                aggregateValues(formatted,"day")
+                aggregateValues(formatted,"month")
+        
         except Exception as e:
             sql.rollback()
             print(f"Error: {e}")

@@ -7,136 +7,191 @@ from highcharts_core.chart import Chart
 from highcharts_core.options.series.area import LineSeries
 from datetime import datetime, timedelta
 from tabulate import tabulate
-
+clients = []
 farms = []
 farmNames = []
-now=""
-#We are gonna need socketio to communicate 
+now=""#"Today's" date, according to the data
 app= Flask(__name__)
 app.config['SECRET_KEY']= 'AEIOU'
+#We are gonna need socketio to communicate 
 socketio=SocketIO(app)
 mywebname="http://localhost:5000/"
 
-def generateStaticChart(df, title):
-    chart=Chart.from_pandas(df,
-                  property_map = {
-                      'x': 'date',
-                      'y': 'Intensity',
-                      #'name': ['Intensity','Voltage','PanelTemperature','Irradiance']
-                      },
-                  chart_kwargs={'container': 'target_div','variable_name': 'myChart'},
-                  options_kwargs={'title': {'text': title},'x_axis': {'type': 'datetime','dateTimeLabelFormats': {'day': '%e %b %Y','second': '%e %b %Y %H:%M:%S'}}}
-                  )
-    return chart.to_js_literal() 
-
-def generateLiveChart(df, title):
-
-    config = {
-        'chart': {
-            'type': 'line',
-            'events': {
-                'load': 'requestData'  # Set the event load attribute to the requestData function
-            }
-        },
-        'title': {
-            'text': title
-        },
-        'xAxis': {
-            'type': 'datetime',
-            'title': {
-                'text': 'Datetime'
-            },
-            'dateTimeLabelFormats': {
-                        'millisecond': '%Y-%m-%d %H:%M:%S',
-                        'second': '%Y-%m-%d %H:%M:%S',
-                        'minute': '%Y-%m-%d %H:%M',
-                        'hour': '%Y-%m-%d %H:%M',
-                        'day': '%Y-%m-%d',
-                        'week': '%Y-%m-%d',
-                        'month': '%Y-%m',
-                        'year': '%Y'}
-        },
-        'yAxis': {
-            'title': {
-                'text': 'KWatts'
-            }
-        },
-        'series': [{
-            'name': title,
-            'data': df[['date', 'Power']].values.tolist()  # Convert DataFrame to list of lists
-        }]
-    }
-
-    return config
 
 @app.route("/", methods=["GET","POST"])
 def welcomePage():
-    #my_chart=generateLiveChart(farms[1], "etsist2")
-    df=farms[1]
-    return render_template("day-month_view.html",farms=farmNames, data=df[['date', 'Power']].values.tolist(),title=farmNames[1])
-
-@app.route("/database", methods=["GET","POST"])
-def plotFilteredData():
     if request.method=='POST':
-        start_date = request.form.get('start-date')
-        end_date = request.form.get('end-date')
-        farm = request.form.get('options')
-        month_range = request.form.get('date-range')
-        #End and Start date can come as "None" if the "month_range" is some value. 
-        #If the radiobutton is selected as none, month_range will contain an empty string.
-        query=("SELECT * FROM solardata AS d "\
-                "WHERE (d.FarmID = %s) "\
-                "AND (d.date BETWEEN %s AND %s)")
-        if start_date!=None and end_date!=None:
-            start_date=datetime.strptime(start_date,'%Y-%m-%d')
-            end_date=datetime.strptime(end_date,'%Y-%m-%d')
-        elif month_range!="":
-            end_date=datetime.today()
-            if month_range=='last-month':
-                start_date=end_date - datetime.timedelta(months=1)
-            elif month_range=='last-2-months':
-                start_date=end_date - datetime.timedelta(months=2)
+        monthOrLive=request.form.get('data-type')
+        selectedFarm=request.form.get('selected-option')
+        index=farmNames.index(selectedFarm)
+        df=farms[index]
+        if monthOrLive=="live":
+            values=df[['date', 'Power']].values.tolist()
+            predvalues=df[['date', 'predict_power']].values.tolist()
+            series=[{'name':selectedFarm, 'data':values},{'name':"Pred-"+selectedFarm, 'data':predvalues}]
+            return render_template("day-view.html",farms=farmNames, DayData=series,title=selectedFarm)
         else:
-            return render_template("db_connector.html",farms=farmNames, errormsg="Bad request, inconsistency in the dates")
-        try:
-            sql=mysql.connector.connect(user='server',password='serverpass',host='localhost', database='tiempo')
-            cursor=sql.cursor()
-            cursor.execute(query,(farm,start_date,end_date))
-            column_names = cursor.description
-            result=[{column_names[index][0]:column for index, column in enumerate(value)} for value in cursor.fetchall()]#Mention stackoverflow?
-            df=DataFrame(result)
-            as_js_literal=generateStaticChart(df,'Generated chart')
-            return render_template("db_connector.html",farms=farmNames, graph=as_js_literal)
-        except:
-            return render_template("db_connector.html",farms=farmNames, errormsg="Could not connect to the database")
-    elif request.method=='GET':
-        return render_template("db_connector.html",farms=farmNames)
+            #We should take all the info from the database. Take this month from the first until what would be yesterday and plot everything, as well as the stats, calculated here below
+            #They are calculated here as the month is not yet finished. Would be nice to switch months with a click on previous and next...But let's give that job to the database view
+            #Would be nice to send the info to the spark script so not everything is calculated in the server
+            query="SELECT * FROM aggregated_day AS agg\
+                    WHERE MONTH(agg.date) = %s\
+                    AND agg.FarmID = %s"
+            try:
+                sql=mysql.connector.connect(user='server',password='serverpass',host='localhost', database='tiempo')
+                cursor=sql.cursor()
+                print(now.month)
+                cursor.execute(query,[now.month,selectedFarm])
+                #Now, depending on the day of the data, complete the array that will be finally delivered
+                realseries=[]#List of pairs [Date,Powersum]
+                rawlist=cursor.fetchall()
+                wholeset=[]
+                for elem in rawlist:
+                    #Transform all the decimal into floats and the datetime into a string
+                    newelem=[]
+                    i=1#Skip the index column
+                    for field in elem:
+                        if i==1:
+                            newelem.append(str(elem[i]))
+                        elif i==len(elem)-1:
+                            continue
+                        else:
+                            newelem.append(float(elem[i]))
+                        i=i+1
+                    wholeset.append(newelem)
+                                     #Datestr   Powersum       predictedSum
+                    realseries.append([elem[1],float(elem[2]),float(elem[3])])
+                result=[{'name': selectedFarm, 'data':[]},{'name': 'Pred-'+selectedFarm,'data':[]}]
+                sum=[]
+                sumPred=[]
+                for i in range(1,32):
+                    value=0
+                    valuePred=0
+                    for elem in realseries:
+                        if elem[0].day==i:
+                            value=elem[1]
+                            valuePred=elem[2]
+                            break
+                    sum.append(value)
+                    sumPred.append(valuePred)
+                result[0]['data']=sum
+                result[1]['data']=sumPred
+            except Exception as e:
+                print(f"ErrorF: "+repr(e))
+                return render_template("month-view.html",farms=farmNames, errormsg="Could not connect to the database")
+            return render_template("month-view.html",farms=farmNames,title=selectedFarm,wholedata=wholeset ,MonthData=result)
+    if request.method=='GET':
+        return render_template("day-view.html",farms=farmNames)
+
+@app.route("/database", methods=["GET","POST"])#It doesn't need post but I should remove the form in "templates/new_db.html"
+def plotFilteredData():
+    return render_template("new_db.html",farms=farmNames)
+    
+@app.route("/solardata_day", methods=['POST'])
+def getDayData():
+    query=("SELECT Power,predict_power,FarmID,date FROM solardata AS d \
+            WHERE (d.FarmID = %s) \
+            AND (DATE(d.date) = STR_TO_DATE(%s,'%Y-%m-%d'))")
+    obj = request.json
+    print(obj)
+    try:
+        sql=mysql.connector.connect(user='server',password='serverpass',host='localhost', database='tiempo')
+        cursor=sql.cursor()
+        cursor.execute(query,[obj['Farm'],obj['Day']])
+        #https://stackoverflow.com/questions/3286525/return-sql-table-as-json-in-python
+        #Transform sql response into array of json objects
+        result = [dict((cursor.description[i][0], value)for i, value in enumerate(row)) for row in cursor.fetchall()]
+        return result
+    except:
+        return "Error on the query or the db is down"
+
+@app.route("/aggregated_day/single", methods=['POST'])
+def getAggDay():
+    query=("SELECT * FROM aggregated_day AS d \
+                WHERE (d.FarmID = %s)\
+                AND (d.Date = STR_TO_DATE(%s,'%Y-%m-%d'))")
+    obj = request.json
+    print(obj)
+    try:
+        sql=mysql.connector.connect(user='server',password='serverpass',host='localhost', database='tiempo')
+        cursor=sql.cursor()
+        print("Execute")
+        cursor.execute(query,[obj['Farm'],obj['Day']])
+        print("Executed")
+        #https://stackoverflow.com/questions/3286525/return-sql-table-as-json-in-python
+        #Transform sql response into array of json objects
+        print(cursor._executed)
+        result = [dict((cursor.description[i][0], value)for i, value in enumerate(row)) for row in cursor.fetchall()]
+        result =list(result[0].values())
+        print(result)
+        print(type(result))
+        return result
+    except:
+        return "Error on the query or the db is down"
+    
+@app.route("/aggregated_day/month", methods=['POST'])
+def getAggDaysMonth():
+    query="SELECT PowerSum,predPowerSum,FarmID,date FROM aggregated_day AS d \
+                WHERE (d.FarmID = %s) \
+                AND (MONTH(d.date) = %s)\
+                AND (YEAR(d.date)=%s)"
+    obj = request.json
+    print(obj)
+    try:
+        sql=mysql.connector.connect(user='server',password='serverpass',host='localhost', database='tiempo')
+        cursor=sql.cursor()
+        d = datetime.strptime(obj['Month'],'%Y-%m')
+        cursor.execute(query,[obj['Farm'],d.month,d.year])
+        #https://stackoverflow.com/questions/3286525/return-sql-table-as-json-in-python
+        #Transform sql response into array of json objects
+        result = [dict((cursor.description[i][0], value)for i, value in enumerate(row)) for row in cursor.fetchall()]
+        return result
+    except:
+        return "Error on the query or the db is down"
+
+@app.route("/aggregated_month", methods=['POST'])
+def getMonth():
+    query="SELECT * FROM aggregated_month AS d WHERE (d.FarmID = %s) AND (MONTH(d.Date)=%s) AND (YEAR(d.date)=%s)"
+    obj = request.json
+    try:
+        sql=mysql.connector.connect(user='server',password='serverpass',host='localhost', database='tiempo')
+        cursor=sql.cursor()
+        print("Execute")
+        d = datetime.strptime(obj['Month'],'%Y-%m')
+        print(d.month,d.year)
+        cursor.execute(query,[obj['Farm'],d.month,d.year])
+        print("Executed")
+        #https://stackoverflow.com/questions/3286525/return-sql-table-as-json-in-python
+        #Transform sql response into array of json objects
+        print(cursor._executed)
+        result = [dict((cursor.description[i][0], value)for i, value in enumerate(row)) for row in cursor.fetchall()]
+        result =list(result[0].values())
+        print(result)
+        print(type(result))
+        return result
+    except Exception as e:
+        print(f"ErrorF: "+repr(e))
+        return "Error on the query or the db is down"
 
 @app.route("/newpoints")
 def getNewPoint():
     i=0
     ret={}
     for farm in farms:
-        lastelem=farm.iloc[-1].to_json()
+        try:#If the dataset is empty, skip to the next one
+            lastelem=farm.iloc[-1].to_dict()
+        except:
+            lastelem=""
         ret[farmNames[i]]=lastelem
         i=i+1
-    return json.dumps(ret)
-
-@app.route("/<path:text>")
-def deliverGraphs(text):
-    try:
-        index=farmNames.index(text)
-    except ValueError:
-        return render_template('404.html')
-    my_chart=generateChart(farms[index], text)
-    as_js_literal=my_chart.to_js_literal()
-    my_chart.to_js_literal("literal.js")
-    return render_template("index.html",js_literal=as_js_literal)
+    ret=json.dumps(ret)
+    return ret
 
 @app.errorhandler(404)
-def page_not_found():
+def page_not_found(a):
     return render_template('404.html')
 
+#TODO
 @socketio.on('Alerts')
 def handle_alert(data):
     #Store in the server
@@ -153,7 +208,7 @@ def handle_message(data):
         formatted["date"]=datetime.strptime(formatted["date"],'%Y-%m-%dT%H:%M:%S')
         global now
         if now=="":
-            now=formatted["date"].date()
+            now=formatted["date"].date()#Type date, day-month-year
         elif now!=formatted["date"].date():
             now = formatted["date"].date()
             i=0
@@ -171,15 +226,13 @@ def handle_message(data):
         index=farmNames.index(formatted["FarmID"])
         formatted.pop("FarmID")
         farms[index]=concat([farms[index],DataFrame(formatted,index=[0])],ignore_index=True)
-        print(tabulate(farms[index],headers='keys',tablefmt='psql'))
     except ValueError:
         farmNames.append(formatted["FarmID"])
         formatted.pop("FarmID")
         newdf=DataFrame(formatted,index=[0])
         newdf["date"].astype('int64')
         farms.append(newdf)
-        print(tabulate(newdf,headers='keys',tablefmt='psql'))
 
 
 if __name__ == '__main__':
-    socketio.run(app)
+    socketio.run(app, host="0.0.0.0")
