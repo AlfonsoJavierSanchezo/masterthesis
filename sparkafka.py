@@ -9,6 +9,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
 from threading import Timer
+import subprocess
+import os
 farmNames=[]
 #Aggregated data will be stored as a list of dicts with numbers
 #Keys:'PowerSum' 'IrradianceMean' 'IrradianceMax' 'IrradianceMin' 'PanelTemperatureMean' 'PanelTemperatureMax' 'PanelTemperatureMin' 
@@ -17,6 +19,8 @@ aggrDay=[]
 aggrMonth=[]
 today=""
 thisMonth=""
+
+sio=socketio.SimpleClient()
     
 def calculatePrediction(irradiance, cellTemp, farm):
     if farm=='etsist1':
@@ -27,6 +31,8 @@ def calculatePrediction(irradiance, cellTemp, farm):
         return (5.1*irradiance*(1-0.0035*(cellTemp-25)))/1000
 
 def getPowerRelation(real, prediction):
+    if prediction==0:
+        return 1
     percentage=(prediction-real)/prediction
     if percentage<0:
         percentage=-percentage
@@ -34,8 +40,6 @@ def getPowerRelation(real, prediction):
 
 def powerTooLow(farmID,percentage):
     try:
-        sio=socketio.SimpleClient()
-        sio.connect("http://localhost:5000")
         sio.emit('Alerts: Farm ',farmID+" is producing very little power")
     except:
         print("Error while emitting an alert")
@@ -52,10 +56,8 @@ def powerTooLow(farmID,percentage):
     except:
         sql.rollback()
     finally:
-        sio.disconnect()
         cursor.close()
         sql.close()
-        print("Handled alert")
 
 def maxf(n1,n2):
     if n1>n2:
@@ -71,8 +73,6 @@ def minf(n1,n2):
 
 def dataNotStructured(farmID):
     try:
-        sio=socketio.SimpleClient()
-        sio.connect("http://localhost:5000")
         sio.emit('Alerts',farmID+" has sent incorrect information")
     except:
         print("Error while emitting an alert")
@@ -89,10 +89,8 @@ def dataNotStructured(farmID):
     except:
         sql.rollback()
     finally:
-        sio.disconnect()
         cursor.close()
         sql.close()
-        print("Handled alert")
 
 def aggregateValues(data,dayormonth):
     #Data only contains an entry about a solar farm
@@ -164,7 +162,6 @@ def writeAggrDatabase(db_name):
         farms=aggrMonth
         date=thisMonth
     else:
-        print("day")
         farms=aggrDay
         date=today
     try:
@@ -172,8 +169,6 @@ def writeAggrDatabase(db_name):
         cursor=sql.cursor()
         i=0
         for farm in farms:
-            print(farms[i][0])
-            print(farms[i][1])
             args=[
                 str(date),
                 str(farms[i][1]['PowerSum']),
@@ -193,9 +188,7 @@ def writeAggrDatabase(db_name):
                 farms[i][0]
                 ]
             
-            print("Executing query")
             cursor.execute(query,args)
-            print(cursor.statement)
             i=i+1
     except Exception as e:
         print(f"ErrorF: "+repr(e))
@@ -207,8 +200,6 @@ def writeAggrDatabase(db_name):
 
 def idleAlert(farmID):
     try:
-        sio=socketio.SimpleClient()
-        sio.connect("http://localhost:5000")
         sio.emit('Alerts',farmID+" has not send information for an hour now, check its state")
     except:
         print("Error while emitting an alert")
@@ -227,7 +218,6 @@ def idleAlert(farmID):
         sql.rollback()
     finally:
         print("Saving Alert")
-        sio.disconnect()
         cursor.close()
         sql.close()
         print("Handled alert")
@@ -238,7 +228,6 @@ def write_to_sql(df, batchID):
         #Fill the values that aren't present but necesary with null
         schema=["date","Irradiance","PanelTemperature","Voltage","Intensity","Power","FarmID"]
         formatted=json.loads(row)
-        print(formatted)
         keys=list(formatted.keys())
         global today
         global thisMonth
@@ -246,7 +235,6 @@ def write_to_sql(df, batchID):
         global aggrMonth
         if today=="":
             today=datetime.strptime(formatted["date"],'%Y-%m-%dT%H:%M:%S').date()
-            print(today)
             thisMonth=today
         global farmNames
         alert=False
@@ -260,7 +248,6 @@ def write_to_sql(df, batchID):
             continue
         try:
             formatted['predict_power']=calculatePrediction(formatted['Irradiance'],formatted['PanelTemperature'],formatted['FarmID'])
-            print(formatted['predict_power'])
         except:
             formatted['predict_power']=0
         #If we're at night, the power might be too low to take correct predictions and send alarms
@@ -274,23 +261,23 @@ def write_to_sql(df, batchID):
             if farmNames[i][0]==formatted["FarmID"]:
                 if farmNames[i][1]!= None:
                     farmNames[i][1].cancel()
-                farmNames[i][1]=Timer(3600.0,idleAlert,[formatted["FarmID"]]).start()
+                farmNames[i][1]=Timer(3600.0,idleAlert,[formatted["FarmID"]])
+                farmNames[i][1].start()
                 newelem=False
                 break
             i=i+1
         if newelem:
             aggrDay.append([formatted["FarmID"],{}])
             aggrMonth.append([formatted["FarmID"],{}])
-            farmNames.append([formatted["FarmID"],Timer(3600,idleAlert,[formatted["FarmID"]]).start()])
+            t=Timer(3600,idleAlert,[formatted["FarmID"]])
+            farmNames.append([formatted["FarmID"],t.start()])
 
         try:
-            sio=socketio.SimpleClient()
-            sio.connect("http://localhost:5000")
             sio.emit('NewSolarData',json.dumps(formatted))
-        except:
+        except Exception as e:
+            print("Error sio "+repr(e))
             print("Could not connect to server")
-        finally:
-            sio.disconnect()
+        
         #Store the rows in the database, 'formatted' is a dictionary with all the json fields accessible by formatted["field"]
         try:
             sql=mysql.connector.connect(user='spark',password='sparkpass',host='localhost', database='tiempo')
@@ -311,13 +298,13 @@ def write_to_sql(df, batchID):
             if today != now:
                 #If a day passed, reset the aggregated data and store them in the database
                 writeAggrDatabase('aggregated_day')
-                print(today)
                 today=now
-                print(today)
                 i=0
+                #Reset the variables
                 for dicts in aggrDay:
                     aggrDay[i]=[aggrDay[i][1],{}]
                     i=i+1
+                i=0
                 if now.month!=thisMonth.month:
                     writeAggrDatabase('aggregated_month')
                     thisMonth=now
@@ -346,6 +333,20 @@ if __name__ == "__main__":
     bootstrapServers = sys.argv[1]
     subscribeType = sys.argv[2]
     topics = sys.argv[3]
+    sio.connect("http://localhost:5000")
+    try:
+        files = subprocess.Popen(['ls','-t','checkpoint/offsets'], stdout=subprocess.PIPE)
+        latest_file = subprocess.check_output(['head','-n','1'], stdin=files.stdout)
+        files.wait()
+        latest_file=int(latest_file)
+    except Exception as e:
+        print("Error getting file: "+repr(e))
+        #Maybe there are no checkpoints yet. In this case let spark start with the latest index
+        #https://spark.apache.org/docs/latest/structured-streaming-kafka-integration.html
+        latest_file=-1
+    #Also just in case
+    if type(latest_file)!=int or latest_file<-2:
+        latest_file=-1
 
     spark = SparkSession\
         .builder\
@@ -367,8 +368,9 @@ if __name__ == "__main__":
         .format("kafka")\
         .option("kafka.bootstrap.servers", bootstrapServers)\
         .option(subscribeType, topics)\
+        .option("startingOffsets",'{"'+topics+'":{"0":'+str(latest_file)+'}}')\
         .load()\
-        .select(from_json(col("value").cast("string"), jsonSchema ).alias("stats"))\
+        .select(from_json(col("value").cast("string"),jsonSchema).alias("stats"))\
         .select(col("stats.*"))\
         .withColumnRenamed("FechaHora","date")\
         .withColumnRenamed("G","Irradiance")\
@@ -381,10 +383,7 @@ if __name__ == "__main__":
  #For debug, we'll put this into a database afterwards
     todatabase= datastream.writeStream\
             .foreachBatch(write_to_sql)\
+            .option('checkpointLocation', 'checkpoint')\
             .start()
     
     todatabase.awaitTermination()
-
-#TODO Add a function that calculates monthly statistics and sends it to the MonthlyAggregation table in the database
-#The database will have the same structure as the Solardata one but it will store means, max and mins (not for all the data)
-#We need global variables for each data and when a month passes, the aggregated data will be stored in the database

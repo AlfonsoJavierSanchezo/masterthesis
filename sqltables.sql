@@ -6,6 +6,7 @@ CREATE TABLE `solardata` (
   `Intensity` decimal(15,7) DEFAULT NULL,
   `Voltage` decimal(15,7) DEFAULT NULL,
   `Power` decimal(15,7) DEFAULT NULL,
+  `predict_power` decimal(15,7) DEFAULT NULL,
   `FarmID` varchar(20) DEFAULT NULL,
   PRIMARY KEY (`ID`)
 );
@@ -21,6 +22,7 @@ CREATE TABLE `aggregated_day` (
   `ID` int NOT NULL AUTO_INCREMENT,
   `date` date DEFAULT NULL,
   `PowerSum` decimal(15,7) DEFAULT NULL,
+  `PredPowerSum` decimal(15,7) DEFAULT NULL,
   `IrradianceMean` decimal(15,7) DEFAULT NULL,
   `IrradianceMax` decimal(15,7) DEFAULT NULL,
   `IrradianceMin` decimal(15,7) DEFAULT NULL,
@@ -40,6 +42,7 @@ CREATE TABLE `aggregated_month` (
   `ID` int NOT NULL AUTO_INCREMENT,
   `date` date DEFAULT NULL,
   `PowerSum` decimal(15,7) DEFAULT NULL,
+  `PredPowerSum` decimal(15,7) DEFAULT NULL,
   `IrradianceMean` decimal(15,7) DEFAULT NULL,
   `IrradianceMax` decimal(15,7) DEFAULT NULL,
   `IrradianceMin` decimal(15,7) DEFAULT NULL,

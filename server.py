@@ -120,11 +120,8 @@ def getAggDay():
         print("Executed")
         #https://stackoverflow.com/questions/3286525/return-sql-table-as-json-in-python
         #Transform sql response into array of json objects
-        print(cursor._executed)
         result = [dict((cursor.description[i][0], value)for i, value in enumerate(row)) for row in cursor.fetchall()]
         result =list(result[0].values())
-        print(result)
-        print(type(result))
         return result
     except:
         return "Error on the query or the db is down"
@@ -166,8 +163,6 @@ def getMonth():
         print(cursor._executed)
         result = [dict((cursor.description[i][0], value)for i, value in enumerate(row)) for row in cursor.fetchall()]
         result =list(result[0].values())
-        print(result)
-        print(type(result))
         return result
     except Exception as e:
         print(f"ErrorF: "+repr(e))
@@ -199,7 +194,8 @@ def handle_alert(data):
 
 @socketio.on('NewSolarData')
 def handle_message(data):
-    print('Received mesage: '+str(data))
+    print('Received mesage: ')
+    print(str(data))
     #Data is a jsonString with all the info
     #Treat the data and add it to the list of data that highcharts will show
     formatted=json.loads(data)
@@ -232,7 +228,7 @@ def handle_message(data):
         newdf=DataFrame(formatted,index=[0])
         newdf["date"].astype('int64')
         farms.append(newdf)
-
+        #print(tabulate(newdf,headers='keys',tablefmt='sql'))
 
 if __name__ == '__main__':
     socketio.run(app, host="0.0.0.0")
