@@ -46,7 +46,7 @@
                 <option value="{{farm}}">{{farm|safe}}</option>
                 {% endfor %}
             </select>
-            <button type="submit-button">Submit</button>
+            <button type="submit-button" onclick="saveState();">Submit</button>
             <div>Or look into the <a href="/database">database</a></div>
         </form>
 
@@ -81,15 +81,22 @@
     </div>
     <script>
 	let chart;
-        function checkDropdownOptions() {
-            const dropdown = document.getElementById('options-dropdown');
-            const submitButton = document.getElementById('submit-button');
-            if (dropdown.options.length === 0) {
-                submitButton.disabled = true;
-            } else {
-                submitButton.disabled = false;
-            }
+    let currentFarm
+
+    function saveState(){
+        const dropdown = document.getElementById('options-dropdown');
+        currentFarm= dropdown.value;
+    }
+
+    function checkDropdownOptions() {
+        const dropdown = document.getElementById('options-dropdown');
+        const submitButton = document.getElementById('submit-button');
+        if (dropdown.options.length === 0) {
+            submitButton.disabled = true;
+        } else {
+            submitButton.disabled = false;
         }
+    }
         // Initial check when the page loads
     async function requestData() {
     console.log('Called the functions');
@@ -98,8 +105,7 @@
         const data = await result.json();
         console.log('Raw data from server:', data);
         const dropdown = document.getElementById('options-dropdown');
-        const farm = dropdown.value;
-        const farmInfo = data[farm];
+        const farmInfo = data[currentFarm];
         console.log('Parsed data for selected farm:', farmInfo);
 
         // Check if the new point is different from the last point
@@ -115,7 +121,7 @@
             console.log('New point is the same as the last point. Skipping addition.');
         }
         // Call it again after one second
-        setTimeout(requestData, 5000);
+        setTimeout(requestData, 1000);
     	document.getElementById("performance-data").innerHTML = (farmInfo.predict_power/farmInfo.Power).toString()+"%";
     	document.getElementById("intensity-data").innerHTML = farmInfo.Intensity.toString();
     	document.getElementById("voltage-data").innerHTML = farmInfo.Voltage.toString();
@@ -124,7 +130,7 @@
     	document.getElementById("irradiance-data").innerHTML = farmInfo.Irradiance.toString();
     } else {
         console.error('Failed to fetch data:', result.statusText);
-        setTimeout(requestData, 5000);
+        setTimeout(requestData, 1000);
     }
     //This should only execute with live data so let's update the table values
 }

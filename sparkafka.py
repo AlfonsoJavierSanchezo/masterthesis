@@ -20,7 +20,7 @@ aggrMonth=[]
 today=""
 thisMonth=""
 
-sio=socketio.SimpleClient()
+sio=socketio.Client()
     
 def calculatePrediction(irradiance, cellTemp, farm):
     if farm=='etsist1':
@@ -40,7 +40,7 @@ def getPowerRelation(real, prediction):
 
 def powerTooLow(farmID,percentage):
     try:
-        sio.emit('Alerts: Farm ',farmID+" is producing very little power")
+        sio.emit('Alerts',farmID+" is producing very little power")
     except:
         print("Error while emitting an alert")
     try:
@@ -94,6 +94,8 @@ def dataNotStructured(farmID):
 
 def aggregateValues(data,dayormonth):
     #Data only contains an entry about a solar farm
+
+    print("aggregating "+data["FarmID"])
     i=0
     global aggrDay
     global aggrMonth
@@ -126,6 +128,7 @@ def aggregateValues(data,dayormonth):
                     farms[i][1]['VoltageMax']=maxf(farm[1]['VoltageMax'],data['Voltage'])
                     farms[i][1]['VoltageMin']=minf(farm[1]['VoltageMin'],data['Voltage'])
                     farms[i][1]['NumVol']=farm[1]['NumVol']+1
+                print("aggregated "+data["FarmID"])
                 
             except Exception as e:
                 print(f"ErrorF: "+repr(e))
@@ -156,6 +159,7 @@ def writeAggrDatabase(db_name):
         ,IntensityMean,IntensityMax,IntensityMin,\
         VoltageMean,VoltageMax,VoltageMin,FarmID)\
         VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+    print("??")
     global aggrMonth
     global aggrDay
     if db_name=="aggregated_month":
@@ -223,6 +227,11 @@ def idleAlert(farmID):
         print("Handled alert")
 
 def write_to_sql(df, batchID):
+    if(not sio.connected):
+        try:
+            sio.connect("http://localhost:5000")
+        except:
+            print("Could not connect to the server")
     rows=df.toJSON().collect()
     for row in rows:
         #Fill the values that aren't present but necesary with null
@@ -333,21 +342,26 @@ if __name__ == "__main__":
     bootstrapServers = sys.argv[1]
     subscribeType = sys.argv[2]
     topics = sys.argv[3]
-    sio.connect("http://localhost:5000")
+    try:
+        sio.connect("http://localhost:5000")
+    except:
+        print("Could not connect to the server")   
     try:
         files = subprocess.Popen(['ls','-t','checkpoint/offsets'], stdout=subprocess.PIPE)
         latest_file = subprocess.check_output(['head','-n','1'], stdin=files.stdout)
         files.wait()
         latest_file=int(latest_file)
+        latest_file=str(latest_file)
+        print("File: "+latest_file)
+        file= open("checkpoint/offsets/"+latest_file, mode='r', encoding='utf-8-sig')
+        lines= file.readlines()
+        cpoint=lines[-1]
     except Exception as e:
         print("Error getting file: "+repr(e))
         #Maybe there are no checkpoints yet. In this case let spark start with the latest index
         #https://spark.apache.org/docs/latest/structured-streaming-kafka-integration.html
-        latest_file=-1
-    #Also just in case
-    if type(latest_file)!=int or latest_file<-2:
-        latest_file=-1
-
+        cpoint='{"'+topics+'":{"0":-1}}'
+    
     spark = SparkSession\
         .builder\
         .appName("Get&FormatSolarData")\
@@ -363,12 +377,13 @@ if __name__ == "__main__":
                          ])
 
     #Create DataSet representing the stream of input lines from kafka
+    print("***"+cpoint)
     datastream = spark\
         .readStream\
         .format("kafka")\
         .option("kafka.bootstrap.servers", bootstrapServers)\
         .option(subscribeType, topics)\
-        .option("startingOffsets",'{"'+topics+'":{"0":'+str(latest_file)+'}}')\
+        .option("startingOffsets",cpoint)\
         .load()\
         .select(from_json(col("value").cast("string"),jsonSchema).alias("stats"))\
         .select(col("stats.*"))\
