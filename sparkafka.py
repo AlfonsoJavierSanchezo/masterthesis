@@ -382,6 +382,7 @@ if __name__ == "__main__":
         .readStream\
         .format("kafka")\
         .option("kafka.bootstrap.servers", bootstrapServers)\
+        .option("failOnDataLoss", "false")\
         .option(subscribeType, topics)\
         .option("startingOffsets",cpoint)\
         .load()\

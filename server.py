@@ -1,5 +1,5 @@
 from flask import Flask, render_template,redirect,url_for,request
-from flask_socketio import SocketIO
+import socketio
 import json
 import mysql.connector
 from pandas import DataFrame,concat
@@ -11,11 +11,16 @@ clients = []
 farms = []
 farmNames = []
 now=""#"Today's" date, according to the data
-app= Flask(__name__)
-app.config['SECRET_KEY']= 'AEIOU'
+#app= Flask(__name__)
+#app.config['SECRET_KEY']= 'AEIOU'
 #We are gonna need socketio to communicate 
-socketio=SocketIO(app)
+sio = socketio.Server(
+)
+app = Flask(__name__)
+app.wsgi_app = socketio.WSGIApp(sio, app.wsgi_app)
+app.config['SECRET_KEY'] = 'secret!'
 mywebname="http://localhost:5000/"
+roomName="getLiveData"
 
 
 @app.route("/", methods=["GET","POST"])
@@ -93,7 +98,6 @@ def getDayData():
             WHERE (d.FarmID = %s) \
             AND (DATE(d.date) = STR_TO_DATE(%s,'%Y-%m-%d'))")
     obj = request.json
-    print(obj)
     try:
         sql=mysql.connector.connect(user='server',password='serverpass',host='localhost', database='tiempo')
         cursor=sql.cursor()
@@ -111,13 +115,10 @@ def getAggDay():
                 WHERE (d.FarmID = %s)\
                 AND (d.Date = STR_TO_DATE(%s,'%Y-%m-%d'))")
     obj = request.json
-    print(obj)
     try:
         sql=mysql.connector.connect(user='server',password='serverpass',host='localhost', database='tiempo')
         cursor=sql.cursor()
-        print("Execute")
         cursor.execute(query,[obj['Farm'],obj['Day']])
-        print("Executed")
         #https://stackoverflow.com/questions/3286525/return-sql-table-as-json-in-python
         #Transform sql response into array of json objects
         result = [dict((cursor.description[i][0], value)for i, value in enumerate(row)) for row in cursor.fetchall()]
@@ -167,7 +168,7 @@ def getMonth():
     except Exception as e:
         print(f"ErrorF: "+repr(e))
         return "Error on the query or the db is down"
-
+'''
 @app.route("/newpoints")
 def getNewPoint():
     i=0
@@ -181,19 +182,19 @@ def getNewPoint():
         i=i+1
     ret=json.dumps(ret)
     return ret
-
+'''
 @app.errorhandler(404)
 def page_not_found(a):
     return render_template('404.html')
 
 #TODO
-@socketio.on('Alerts')
-def handle_alert(data):
+@sio.on('Alerts')
+def handle_alert(id, data):
     #Store in the server
     print("New alert: "+str(data))
 
-@socketio.on('NewSolarData')
-def handle_message(data):
+@sio.on('NewSolarData')
+def handle_message(id,data):
     print('Received mesage: ')
     print(str(data))
     #Data is a jsonString with all the info
@@ -218,6 +219,7 @@ def handle_message(data):
         #The data must have a date value, skip if it there isn't or its format is incorrect
         return
     formatted["date"]=formatted["date"].timestamp()*1000+7200000
+    sio.emit("liveData",json.dumps(formatted),to=roomName)
     try:
         index=farmNames.index(formatted["FarmID"])
         formatted.pop("FarmID")
@@ -229,6 +231,17 @@ def handle_message(data):
         newdf["date"].astype('int64')
         farms.append(newdf)
         #print(tabulate(newdf,headers='keys',tablefmt='sql'))
+    
+
+
+@sio.event
+def disconnect(sid):
+    sio.leave_room(sid, roomName)
+
+@sio.on('join')
+def prueba(sid,data):
+    sio.enter_room(sid, roomName)
 
 if __name__ == '__main__':
-    socketio.run(app, host="0.0.0.0")
+    #Would be nice to initialize farms to the strings of a table in the db to have them from the beginning
+    app.run(host="0.0.0.0")

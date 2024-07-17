@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Highcharts with Radio Button and Dropdown</title>
     <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO" crossorigin="anonymous"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -43,10 +44,10 @@
             <label for="monthly">Monthly statistics</label>
             <select id="options-dropdown" name="selected-option">
                 {% for farm in farms %}
-                <option value="{{farm}}">{{farm|safe}}</option>
+                <option value="{{farm|safe}}">{{farm|safe}}</option>
                 {% endfor %}
             </select>
-            <button type="submit-button" onclick="saveState();">Submit</button>
+            <button type="submit-button">Submit</button>
             <div>Or look into the <a href="/database">database</a></div>
         </form>
 
@@ -80,61 +81,53 @@
         </div>
     </div>
     <script>
+    var socket;
 	let chart;
-    let currentFarm
-
-    function saveState(){
-        const dropdown = document.getElementById('options-dropdown');
-        currentFarm= dropdown.value;
-    }
-
-    function checkDropdownOptions() {
-        const dropdown = document.getElementById('options-dropdown');
-        const submitButton = document.getElementById('submit-button');
-        if (dropdown.options.length === 0) {
-            submitButton.disabled = true;
-        } else {
-            submitButton.disabled = false;
+        function checkDropdownOptions() {
+            const dropdown = document.getElementById('options-dropdown');
+            const submitButton = document.getElementById('submit-button');
+            if (dropdown.options.length === 0) {
+                submitButton.disabled = true;
+            } else {
+                submitButton.disabled = false;
+            }
         }
-    }
         // Initial check when the page loads
     async function requestData() {
-    console.log('Called the functions');
-    const result = await fetch('http://localhost:5000/newpoints');
-    if (result.ok) {
-        const data = await result.json();
-        console.log('Raw data from server:', data);
-        const dropdown = document.getElementById('options-dropdown');
-        const farmInfo = data[currentFarm];
-        console.log('Parsed data for selected farm:', farmInfo);
-
-        // Check if the new point is different from the last point
-        const lastPoint = chart.series[0].data[chart.series[0].data.length - 1];
-	    const newPoint = [farmInfo.date, farmInfo.Power]
-        const newPoint2 = [farmInfo.date, farmInfo.predict_power]
-	    console.log('Last point:', lastPoint);
-        if (lastPoint.x !== newPoint[0] || lastPoint.y !== newPoint[1]) {
-	    console.log('Adding new point:', newPoint);
-            chart.series[0].addPoint(newPoint, true);
-            chart.series[1].addPoint(newPoint2, true);
-        } else {
-            console.log('New point is the same as the last point. Skipping addition.');
-        }
-        // Call it again after one second
-        setTimeout(requestData, 1000);
-    	document.getElementById("performance-data").innerHTML = (farmInfo.predict_power/farmInfo.Power).toString()+"%";
-    	document.getElementById("intensity-data").innerHTML = farmInfo.Intensity.toString();
-    	document.getElementById("voltage-data").innerHTML = farmInfo.Voltage.toString();
-    	document.getElementById("production-data").innerHTML = farmInfo.Power.toString();
-    	document.getElementById("cell-temperature-data").innerHTML = farmInfo.PanelTemperature.toString();
-    	document.getElementById("irradiance-data").innerHTML = farmInfo.Irradiance.toString();
-    } else {
-        console.error('Failed to fetch data:', result.statusText);
-        setTimeout(requestData, 1000);
+        socket.emit("join","this is supposed to be optional but doesnt work without it");
     }
-    //This should only execute with live data so let's update the table values
-}
 	document.addEventListener('DOMContentLoaded', function () {
+        socket= io();
+        socket.on("liveData", ( data ) => {
+            console.log('Raw data from server:', data);
+            data=JSON.parse(data)
+            const dropdown = document.getElementById('options-dropdown');
+            const farm = dropdown.value;
+            console.log(farm+" and "+data["FarmID"])
+            if(data.FarmID!=farm){
+                return;
+            }
+
+            // Check if the new point is different from the last point
+            const lastPoint = chart.series[0].data[chart.series[0].data.length - 1];
+            const newPoint = [data.date, data.Power]
+            const newPoint2 = [data.date, data.predict_power]
+            console.log('Last point:', lastPoint);
+            if (lastPoint.x !== newPoint[0] || lastPoint.y !== newPoint[1]) {
+            console.log('Adding new point:', newPoint);
+                chart.series[0].addPoint(newPoint, true);
+                chart.series[1].addPoint(newPoint2, true);
+            } else {
+                console.log('New point is the same as the last point. Skipping addition.');
+            }
+            //This should only execute with live data so let's update the table values
+            document.getElementById("performance-data").innerHTML = (data.Power/data.predict_power*100).toFixed(4).toString()+"%";
+            document.getElementById("intensity-data").innerHTML = data.Intensity.toString();
+            document.getElementById("voltage-data").innerHTML = data.Voltage.toString();
+            document.getElementById("production-data").innerHTML = data.Power.toString();
+            document.getElementById("cell-temperature-data").innerHTML = data.PanelTemperature.toString();
+            document.getElementById("irradiance-data").innerHTML = data.Irradiance.toString();
+        });
         var chartConfig = {
             chart: {
                 type: 'line',
@@ -151,12 +144,9 @@
                     text: 'Datetime'
                 },
                 dateTimeLabelFormats: {
-                            minute: '%Y-%m-%d %H:%M',
-                            hour: '%Y-%m-%d %H:%M',
-                            day: '%Y-%m-%d',
-                            week: '%Y-%m-%d',
-                            month: '%Y-%m',
-                            year: '%Y'}
+                                minute: '%H:%M',
+                                hour: '%H:%M'
+                }
             },
             yAxis: {
                 title: {
@@ -164,7 +154,7 @@
                 }
             },
             series: {{DayData|safe}}
-        }
+        };
             chart= Highcharts.chart('target_div', chartConfig);
         });
 	
