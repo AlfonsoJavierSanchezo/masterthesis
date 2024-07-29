@@ -1,4 +1,4 @@
-from flask import Flask, render_template,redirect,url_for,request
+from flask import Flask, render_template,make_response,url_for,request
 import socketio
 import json
 import mysql.connector
@@ -22,7 +22,6 @@ app.config['SECRET_KEY'] = 'secret!'
 mywebname="http://localhost:5000/"
 roomName="getLiveData"
 
-
 @app.route("/", methods=["GET","POST"])
 def welcomePage():
     if request.method=='POST':
@@ -34,7 +33,9 @@ def welcomePage():
             values=df[['date', 'Power']].values.tolist()
             predvalues=df[['date', 'predict_power']].values.tolist()
             series=[{'name':selectedFarm, 'data':values},{'name':"Pred-"+selectedFarm, 'data':predvalues}]
-            return render_template("day-view.html",farms=farmNames, DayData=series,title=selectedFarm)
+            response=make_response(render_template("day-view.html",farms=farmNames, DayData=series,title=selectedFarm))
+            response.set_cookie('farm',selectedFarm)
+            return response
         else:
             #We should take all the info from the database. Take this month from the first until what would be yesterday and plot everything, as well as the stats, calculated here below
             #They are calculated here as the month is not yet finished. Would be nice to switch months with a click on previous and next...But let's give that job to the database view
@@ -91,6 +92,32 @@ def welcomePage():
 @app.route("/database", methods=["GET","POST"])#It doesn't need post but I should remove the form in "templates/new_db.html"
 def plotFilteredData():
     return render_template("new_db.html",farms=farmNames)
+
+@app.route("/alerts")
+def showAlerts():
+    query="select * from activeAlerts inner join alertTypes on activeAlerts.alertType=alertTypes.ID"
+    query2="select * from lastSolvedAlerts inner join alertTypes on lastSolvedAlerts.alertType=alertTypes.ID"
+    #No try/except for this to trigger err 500 if fails
+    sql=mysql.connector.connect(user='server',password='serverpass',host='localhost', database='tiempo')
+    cursor=sql.cursor()
+    cursor.execute(query)
+    result1 = [dict((cursor.description[i][0], value)for i, value in enumerate(row)) for row in cursor.fetchall()]
+    cursor.execute(query2)
+    result2 = [dict((cursor.description[i][0], value)for i, value in enumerate(row)) for row in cursor.fetchall()]
+    #https://stackoverflow.com/questions/3286525/return-sql-table-as-json-in-python
+    #Transform sql response into array of json objects
+    
+    i=0
+    for data in result1:
+        result1[i]['Date']=str(result1[i]['Date'])
+        i=i+1
+    i=0
+    for data in result2:
+        result2[i]['Date']=str(result2[i]['Date'])
+        i=i+1
+    return render_template("alerts.html",activeAlerts=result1, solvedAlerts=result2)
+    
+    
     
 @app.route("/solardata_day", methods=['POST'])
 def getDayData():

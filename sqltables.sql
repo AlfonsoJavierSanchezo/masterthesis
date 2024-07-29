@@ -10,14 +10,37 @@ CREATE TABLE `solardata` (
   `FarmID` varchar(20) DEFAULT NULL,
   PRIMARY KEY (`ID`)
 );
+
+CREATE TABLE `alertTypes` (
+  `ID` int NOT NULL AUTO_INCREMENT,
+  `Severity` varchar(20)NOT NULL, 
+  `Description` varchar(200) NOT NULL,
+  PRIMARY KEY (`ID`)
+);
+
+INSERT INTO alertTypes (Severity, Description) VALUES("Warning","Farm didn't send correct information, few fields");
+INSERT INTO alertTypes (Severity, Description) VALUES("Warning","Farm did not send information in an hour now");
+INSERT INTO alertTypes (Severity, Description) VALUES("Warning","Farm's power is too different from estimate");
+
 CREATE TABLE `alerts` (
   `ID` int NOT NULL AUTO_INCREMENT,
   `Date` datetime NOT NULL,
-  `Severity` varchar(10) NOT NULL,
-  `Description` varchar(200) DEFAULT NULL,
+  `alertType` int NOT NULL,
   `FarmID` varchar(20) DEFAULT NULL,
-  PRIMARY KEY (`ID`)
+  PRIMARY KEY (`ID`),
+  FOREIGN KEY(`alertType`) REFERENCES (alertTypes.ID)
 );
+
+CREATE TABLE `activeAlerts` (
+  `ID` int NOT NULL AUTO_INCREMENT,
+  `Date` datetime NOT NULL,
+  `alertType` int NOT NULL,
+  `FarmID` varchar(20) DEFAULT NULL,
+  PRIMARY KEY (`ID`),
+  FOREIGN KEY(`alertType`) REFERENCES (alertTypes.ID),
+  UNIQUE (alertType,FarmID)
+);
+
 CREATE TABLE `aggregated_day` (
   `ID` int NOT NULL AUTO_INCREMENT,
   `date` date DEFAULT NULL,
@@ -58,3 +81,22 @@ CREATE TABLE `aggregated_month` (
   `FarmID` varchar(20) DEFAULT NULL,
   PRIMARY KEY (`ID`)
 );
+
+grant insert on solardata to spark;
+grant insert on aggregated_month to spark;
+grant insert on aggregated_day to spark;
+grant insert on alerts to spark;
+grant insert on activeAlerts to spark;
+grant update on activeAlerts to spark;
+grant delete on activeAlerts to spark;
+grant select on activeAlerts to spark;
+grant insert on lastSolvedAlerts to spark;
+grant update on lastSolvedAlerts to spark;
+
+grant select on solardata to server;
+grant select on aggregated_month to server;
+grant select on aggregated_day to server;
+grant select on alerts to server;
+grant select on activeAlerts to server;
+grant select on alertTypes to server;
+grant select on lastSolvedAlerts to server;

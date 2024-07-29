@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar farm alerts</title>
+    <!-- Highcharts library -->
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <style>
+        #charts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px; /* Space between charts */
+        }
+        .chart-container {
+            flex: 1 1 30%; /* Flex-grow, flex-shrink, flex-basis */
+            min-width: 300px; /* Minimum width for the chart container */
+            height: 400px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Alerts for the different farms: </h1>
+    <div id="activeAlerts"></div>
+    <h1>Last solved alerts: </h1>
+    <div id="solvedAlerts"></div>
+
+    <script>
+        var alertData;
+        var solvedAlertData;
+        // Reusable chart model
+        function createChart(containerId, title, data, alertType) {
+            Highcharts.chart(containerId, {
+                chart: {
+                    type: 'pie'
+                },
+                title: {
+                    text: title
+                },
+                tooltip: {
+                    formatter: function() {
+                        //Get the descriptions for the alerts and the time for when it happened
+                        var str=""
+                        if(alertType=="activeAlerts"){
+                            for(let i=0; i<alertData.length; i++){
+                                actual=alertData[i]
+                                if(actual.Severity==this.point.name && actual.FarmID==title){
+                                    str+="<i>\""+actual.Description+"\" at \""+actual.Date+"\"</i><br/>"
+                                }
+                            }
+                            return '<b>' + this.point.name + '</b>: ' + this.y + '<br/>'+str;
+                        }
+                        if(alertType=="solvedAlerts"){
+                            for(let i=0; i<solvedAlertData.length; i++){
+                                actual=solvedAlertData[i]
+                                if(actual.Severity==this.point.name && actual.FarmID==title){
+                                    str+="<i>\""+actual.Description+"\" at \""+actual.Date+"\"</i><br/>"
+                                }
+                            }
+                            return '<b>' + this.point.name + '</b>: ' + this.y + '<br/>'+str;
+                        }
+                    }
+                },
+                series: [{
+                    name: 'Share',
+                    data: data
+                }]
+            });
+        }
+
+        // Function to generate multiple charts
+        function generateCharts(alertData, parentDiv) {
+            const chartsDiv = document.getElementById(parentDiv);
+            chartsDiv.innerHTML = ''; // Clear any existing charts
+            var dict = [];
+            //Fill dict with the information that will be displayed in the pie charts
+            foundSeverity=false;
+            foundFarm=false;
+            for(let i=0; i<alertData.length; i++){
+                actual=alertData[i]
+                for (let j=0;j<dict.length;j++){
+                    //If the element refers a farm already treated
+                    if(dict[j]["farm"]==actual.FarmID){
+                        //Look for the treated severities
+                        foundFarm=true
+                        for(let k=0; k<dict[j].data.length;k++){
+                            //If we're dealing with an already treated severity, add 1 to it
+                            if(dict[j].data[k].name==actual.Severity){
+                                foundSeverity=true
+                                dict[j].data[k].y++;
+                                break;
+                            }
+                        }
+                        if(!foundSeverity){
+                            dict[j].data.push({name:actual.Severity,y: 1});
+                        }
+                        if(foundFarm)break;
+                    }
+                }
+                if(!foundFarm){
+                    //Structure of the dict object
+                    dict.push({farm: actual.FarmID,data: [{name: actual.Severity, y:1}] });
+                }
+            }
+            for (let i = 0; i < dict.length; i++) {
+                // Create a container for each chart, one per farm
+                const containerId = 'sub-'+parentDiv+'-'+i;
+                const chartDiv = document.createElement('div');
+                chartDiv.id = containerId;
+                chartDiv.className = 'chart-container';
+                chartsDiv.appendChild(chartDiv);
+                // Example data for the chart
+                const data = dict[i].data;
+                // Create the chart
+                createChart(containerId, dict[i].farm, data, parentDiv);
+            }
+        }
+        document.addEventListener('DOMContentLoaded', function () {
+            // alertData is a list of JSON objects containing the alerts
+            alertData={{activeAlerts|safe}};
+            solvedAlertData={{solvedAlerts|safe}};
+            if(alertData===undefined || alertData.length==0){
+                const chartsDiv = document.getElementById('activeAlerts');
+                chartsDiv.innerHTML = 'No active alerts at the moment';
+                if(solvedAlertData===undefined || solvedAlertData.length==0){
+                    const chartsDiv = document.getElementById('solvedAlerts');
+                    chartsDiv.innerHTML = 'No alerts received yet';
+                }
+                return;
+            }
+            generateCharts(alertData,'activeAlerts');
+            generateCharts(solvedAlertData,'solvedAlerts');
+        });
+    </script>
+</body>
+</html>

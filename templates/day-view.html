@@ -49,6 +49,7 @@
             </select>
             <button type="submit-button">Submit</button>
             <div>Or look into the <a href="/database">database</a></div>
+            <div>To see alerts click <a href="/alerts">here</a></div>
         </form>
 
         <div id="target_div"></div>
@@ -83,16 +84,27 @@
     <script>
     var socket;
 	let chart;
-        function checkDropdownOptions() {
-            const dropdown = document.getElementById('options-dropdown');
-            const submitButton = document.getElementById('submit-button');
-            if (dropdown.options.length === 0) {
-                submitButton.disabled = true;
-            } else {
-                submitButton.disabled = false;
-            }
+    // Initial check when the page loads
+    function checkDropdownOptions() {
+        const dropdown = document.getElementById('options-dropdown');
+        const submitButton = document.getElementById('submit-button');
+        if (dropdown.options.length === 0) {
+            submitButton.disabled = true;
+        } else {
+            submitButton.disabled = false;
         }
-        // Initial check when the page loads
+    }
+        
+    function getCookie(name) {
+        const regex = new RegExp(`(^| )${name}=([^;]+)`);
+        const match = document.cookie.match(regex);
+        if (match) {
+            return match[2];
+        }else{
+            return "";
+        }
+    }
+
     async function requestData() {
         socket.emit("join","this is supposed to be optional but doesnt work without it");
     }
@@ -100,14 +112,12 @@
         socket= io();
         socket.on("liveData", ( data ) => {
             console.log('Raw data from server:', data);
-            data=JSON.parse(data)
-            const dropdown = document.getElementById('options-dropdown');
-            const farm = dropdown.value;
-            console.log(farm+" and "+data["FarmID"])
-            if(data.FarmID!=farm){
+            data=JSON.parse(data);
+            const farm = getCookie("farm");
+            console.log(farm+" and "+data["FarmID"]);
+            if(farm == "" || data.FarmID!=farm){
                 return;
             }
-
             // Check if the new point is different from the last point
             const lastPoint = chart.series[0].data[chart.series[0].data.length - 1];
             const newPoint = [data.date, data.Power]

@@ -10,7 +10,9 @@ from pyspark.sql.functions import *
 from pyspark.sql.types import *
 from threading import Timer
 import subprocess
+from enum import Enum
 import os
+#Contains arrays, containing the name for the farm and the timer for the idle alarm
 farmNames=[]
 #Aggregated data will be stored as a list of dicts with numbers
 #Keys:'PowerSum' 'IrradianceMean' 'IrradianceMax' 'IrradianceMin' 'PanelTemperatureMean' 'PanelTemperatureMax' 'PanelTemperatureMin' 
@@ -19,6 +21,12 @@ aggrDay=[]
 aggrMonth=[]
 today=""
 thisMonth=""
+
+#To edit this please check database table named alertTypes
+class alertType(Enum):
+    BadFormat=1
+    FarmIdle=2
+    LowPower=3
 
 sio=socketio.Client()
     
@@ -38,27 +46,6 @@ def getPowerRelation(real, prediction):
         percentage=-percentage
     return percentage
 
-def powerTooLow(farmID,percentage):
-    try:
-        sio.emit('Alerts',farmID+" is producing very little power")
-    except:
-        print("Error while emitting an alert")
-    try:
-        sql=mysql.connector.connect(user='spark',password='sparkpass',host='localhost', database='tiempo')
-        cursor=sql.cursor()
-        add_data="INSERT INTO alerts (Date,Severity,Description,FarmID) VALUES(%s,%s,%s,%s)"
-        data=(datetime.now(),\
-                "Warning",\
-                "Farm's power is too low",\
-                str(percentage)+"%")
-        cursor.execute(add_data,data)
-        sql.commit()
-    except:
-        sql.rollback()
-    finally:
-        cursor.close()
-        sql.close()
-
 def maxf(n1,n2):
     if n1>n2:
         return n1
@@ -71,31 +58,8 @@ def minf(n1,n2):
     else:
         return n2
 
-def dataNotStructured(farmID):
-    try:
-        sio.emit('Alerts',farmID+" has sent incorrect information")
-    except:
-        print("Error while emitting an alert")
-    try:
-        sql=mysql.connector.connect(user='spark',password='sparkpass',host='localhost', database='tiempo')
-        cursor=sql.cursor()
-        add_data="INSERT INTO alerts (Date,Severity,Description,FarmID) VALUES(%s,%s,%s,%s)"
-        data=(datetime.now(),\
-                "Warning",\
-                "Farm didn't send correct information, few fields",\
-                str(farmID))
-        cursor.execute(add_data,data)
-        sql.commit()
-    except:
-        sql.rollback()
-    finally:
-        cursor.close()
-        sql.close()
-
 def aggregateValues(data,dayormonth):
     #Data only contains an entry about a solar farm
-
-    print("aggregating "+data["FarmID"])
     i=0
     global aggrDay
     global aggrMonth
@@ -128,7 +92,6 @@ def aggregateValues(data,dayormonth):
                     farms[i][1]['VoltageMax']=maxf(farm[1]['VoltageMax'],data['Voltage'])
                     farms[i][1]['VoltageMin']=minf(farm[1]['VoltageMin'],data['Voltage'])
                     farms[i][1]['NumVol']=farm[1]['NumVol']+1
-                print("aggregated "+data["FarmID"])
                 
             except Exception as e:
                 print(f"ErrorF: "+repr(e))
@@ -159,7 +122,6 @@ def writeAggrDatabase(db_name):
         ,IntensityMean,IntensityMax,IntensityMin,\
         VoltageMean,VoltageMax,VoltageMin,FarmID)\
         VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-    print("??")
     global aggrMonth
     global aggrDay
     if db_name=="aggregated_month":
@@ -202,29 +164,44 @@ def writeAggrDatabase(db_name):
         cursor.close()
         sql.close()
 
-def idleAlert(farmID):
-    try:
-        sio.emit('Alerts',farmID+" has not send information for an hour now, check its state")
-    except:
-        print("Error while emitting an alert")
+def deactivateAlert(alertType, farmID):
     try:
         sql=mysql.connector.connect(user='spark',password='sparkpass',host='localhost', database='tiempo')
         cursor=sql.cursor()
-        add_data="INSERT INTO alerts (Date,Severity,Description,FarmID) VALUES(%s,%s,%s,%s)"
-        data=(datetime.now(),\
-                "Warning",\
-                "Farm did not send information in an hour now",\
-                farmID)
-        print("Saving Alert")
-        cursor.execute(add_data,data)
+        query="INSERT INTO lastSolvedAlerts SELECT * FROM activeAlerts AS a where a.FarmID=%s and a.alertType=%s ON DUPLICATE KEY UPDATE Date=a.Date;"
+        query2="DELETE from activeAlerts as a where a.FarmID=%s and a.alertType=%s"
+        data=[farmID,alertType]
+        cursor.execute(query,data)
+        cursor.execute(query2,data)
         sql.commit()
-    except:
+    except Exception as e:
+        print(f"ErrorF: "+repr(e))
         sql.rollback()
     finally:
-        print("Saving Alert")
         cursor.close()
         sql.close()
-        print("Handled alert")
+
+def sendAlert(alertType, rawData):
+    try:
+        sql=mysql.connector.connect(user='spark',password='sparkpass',host='localhost', database='tiempo')
+        cursor=sql.cursor()
+        query1="INSERT INTO alerts (Date,alertType,FarmID) VALUES(%s,%s,%s)"
+        query2="INSERT INTO activeAlerts (Date,alertType,FarmID) VALUES(%s,%s,%s) \
+                ON DUPLICATE KEY UPDATE Date=%s"
+        data=[rawData["date"],\
+                alertType,\
+                rawData["FarmID"]]
+        cursor.execute(query1,data)
+        data.append(rawData["date"])
+        cursor.execute(query2,data)
+        sql.commit()
+    except Exception as e:
+        print(f"ErrorF: "+repr(e))
+        print("Alarm not saved")
+        sql.rollback()
+    finally:
+        cursor.close()
+        sql.close()
 
 def write_to_sql(df, batchID):
     if(not sio.connected):
@@ -253,7 +230,7 @@ def write_to_sql(df, batchID):
                 alert=True
                 break
         if alert:
-            dataNotStructured(formatted["FarmID"])
+            sendAlert(alertType.BadFormat.value,formatted)
             continue
         try:
             formatted['predict_power']=calculatePrediction(formatted['Irradiance'],formatted['PanelTemperature'],formatted['FarmID'])
@@ -263,22 +240,26 @@ def write_to_sql(df, batchID):
         if formatted['Power']>0.2:
             perc=getPowerRelation(formatted['Power'],formatted['predict_power'])
             if perc<0.25:
-                powerTooLow(formatted['FarmID'],perc)
-        newelem=True
+                sendAlert(alertType.LowPower.value,formatted)
+            else:
+                deactivateAlert(alertType.LowPower.value,formatted['FarmID'])
+        newFarm=True
         i=0
         for pair in farmNames:#Setup of timers
             if farmNames[i][0]==formatted["FarmID"]:
                 if farmNames[i][1]!= None:
                     farmNames[i][1].cancel()
-                farmNames[i][1]=Timer(3600.0,idleAlert,[formatted["FarmID"]])
+                farmNames[i][1]=Timer(3600.0,sendAlert,[alertType.FarmIdle.value,formatted])
                 farmNames[i][1].start()
-                newelem=False
+                deactivateAlert(alertType.FarmIdle.value,formatted['FarmID'])
+                deactivateAlert(alertType.BadFormat.value,formatted['FarmID'])
+                newFarm=False
                 break
             i=i+1
-        if newelem:
+        if newFarm:
             aggrDay.append([formatted["FarmID"],{}])
             aggrMonth.append([formatted["FarmID"],{}])
-            t=Timer(3600,idleAlert,[formatted["FarmID"]])
+            t=Timer(3600,sendAlert,[alertType.FarmIdle.value,formatted])
             farmNames.append([formatted["FarmID"],t.start()])
 
         try:
@@ -307,18 +288,19 @@ def write_to_sql(df, batchID):
             if today != now:
                 #If a day passed, reset the aggregated data and store them in the database
                 writeAggrDatabase('aggregated_day')
+                print(aggrDay)
                 today=now
                 i=0
                 #Reset the variables
                 for dicts in aggrDay:
-                    aggrDay[i]=[aggrDay[i][1],{}]
+                    aggrDay[i]=[farmNames[i][0],{}]
                     i=i+1
                 i=0
                 if now.month!=thisMonth.month:
                     writeAggrDatabase('aggregated_month')
                     thisMonth=now
                     for dicts in aggrMonth:
-                        aggrMonth[i]=[farmNames[i],{}]
+                        aggrMonth[i]=[farmNames[i][0],{}]
                         i=i+1
             #If the day didn't pass yet, continue calculating the aggregated values
             else:
@@ -330,7 +312,7 @@ def write_to_sql(df, batchID):
             print(f"Error: {e}")
         finally:
             cursor.close()
-            sql.close()    
+            sql.close()
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
