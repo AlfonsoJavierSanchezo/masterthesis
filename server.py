@@ -14,13 +14,14 @@ now=""#"Today's" date, according to the data
 #app= Flask(__name__)
 #app.config['SECRET_KEY']= 'AEIOU'
 #We are gonna need socketio to communicate 
-sio = socketio.Server(
-)
+sio = socketio.Server()
 app = Flask(__name__)
 app.wsgi_app = socketio.WSGIApp(sio, app.wsgi_app)
 app.config['SECRET_KEY'] = 'secret!'
 mywebname="http://localhost:5000/"
-roomName="getLiveData"
+generalRoom="room"
+roomPerUser={}
+activeAlerts=[]
 
 @app.route("/", methods=["GET","POST"])
 def welcomePage():
@@ -33,7 +34,7 @@ def welcomePage():
             values=df[['date', 'Power']].values.tolist()
             predvalues=df[['date', 'predict_power']].values.tolist()
             series=[{'name':selectedFarm, 'data':values},{'name':"Pred-"+selectedFarm, 'data':predvalues}]
-            response=make_response(render_template("day-view.html",farms=farmNames, DayData=series,title=selectedFarm))
+            response=make_response(render_template("day-view.html",farms=farmNames, DayData=series,title=selectedFarm,nAlerts=len(activeAlerts)))
             response.set_cookie('farm',selectedFarm)
             return response
         else:
@@ -84,14 +85,14 @@ def welcomePage():
                 result[1]['data']=sumPred
             except Exception as e:
                 print(f"ErrorF: "+repr(e))
-                return render_template("month-view.html",farms=farmNames, errormsg="Could not connect to the database")
-            return render_template("month-view.html",farms=farmNames,title=selectedFarm,wholedata=wholeset ,MonthData=result)
+                return render_template("month-view.html",farms=farmNames, errormsg="Could not connect to the database",nAlerts=len(activeAlerts))
+            return render_template("month-view.html",farms=farmNames,title=selectedFarm,wholedata=wholeset ,MonthData=result,nAlerts=len(activeAlerts))
     if request.method=='GET':
-        return render_template("day-view.html",farms=farmNames)
+        return render_template("day-view.html",farms=farmNames,nAlerts=len(activeAlerts))
 
-@app.route("/database", methods=["GET","POST"])#It doesn't need post but I should remove the form in "templates/new_db.html"
+@app.route("/database", methods=["GET","POST"])#It doesn't need post but I should remove the form in "templates/db_connector.html"
 def plotFilteredData():
-    return render_template("new_db.html",farms=farmNames)
+    return render_template("db_connector.html",farms=farmNames,nAlerts=len(activeAlerts))
 
 @app.route("/alerts")
 def showAlerts():
@@ -195,35 +196,15 @@ def getMonth():
     except Exception as e:
         print(f"ErrorF: "+repr(e))
         return "Error on the query or the db is down"
-'''
-@app.route("/newpoints")
-def getNewPoint():
-    i=0
-    ret={}
-    for farm in farms:
-        try:#If the dataset is empty, skip to the next one
-            lastelem=farm.iloc[-1].to_dict()
-        except:
-            lastelem=""
-        ret[farmNames[i]]=lastelem
-        i=i+1
-    ret=json.dumps(ret)
-    return ret
-'''
+
 @app.errorhandler(404)
 def page_not_found(a):
     return render_template('404.html')
 
-#TODO
-@sio.on('Alerts')
-def handle_alert(id, data):
-    #Store in the server
-    print("New alert: "+str(data))
-
 @sio.on('NewSolarData')
 def handle_message(id,data):
     print('Received mesage: ')
-    print(str(data))
+    #print(str(data))
     #Data is a jsonString with all the info
     #Treat the data and add it to the list of data that highcharts will show
     formatted=json.loads(data)
@@ -246,7 +227,7 @@ def handle_message(id,data):
         #The data must have a date value, skip if it there isn't or its format is incorrect
         return
     formatted["date"]=formatted["date"].timestamp()*1000+7200000
-    sio.emit("liveData",json.dumps(formatted),to=roomName)
+    sio.emit("liveData",json.dumps(formatted),to=formatted["FarmID"])
     try:
         index=farmNames.index(formatted["FarmID"])
         formatted.pop("FarmID")
@@ -259,15 +240,39 @@ def handle_message(id,data):
         farms.append(newdf)
         #print(tabulate(newdf,headers='keys',tablefmt='sql'))
     
+@sio.on("activateAlert")
+def activateAlert(id,newAlert):
+    print("***Alert:"+str(newAlert))
+    i=0
+    for alert in activeAlerts:
+        if(alert["alertType"]==newAlert["alertType"] and alert["FarmID"]==newAlert["FarmID"]):
+            activeAlerts[i]["date"]=newAlert["date"]
+            return
+        i=i+1
+    activeAlerts.append(newAlert)
+
+@sio.on("deactivateAlert")
+def deactivateAlert(id, toDeactivate):
+    i=0
+    for alert in activeAlerts:
+        if(alert["alertType"]==toDeactivate["alertType"] and alert["FarmID"]==toDeactivate["FarmID"]):
+            activeAlerts.pop(i)
+        i=i+1
 
 
 @sio.event
 def disconnect(sid):
-    sio.leave_room(sid, roomName)
+    try:
+    #If the user was never connected to a room, this function would raise a valueError because a join would have never been performed
+        sio.leave_room(sid, roomPerUser[sid])
+        roomPerUser.pop(sid)
+    except:
+        return
 
 @sio.on('join')
 def prueba(sid,data):
-    sio.enter_room(sid, roomName)
+    roomPerUser[sid]=data
+    sio.enter_room(sid, data)
 
 if __name__ == '__main__':
     #Would be nice to initialize farms to the strings of a table in the db to have them from the beginning

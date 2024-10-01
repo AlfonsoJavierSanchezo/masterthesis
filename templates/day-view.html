@@ -49,7 +49,7 @@
             </select>
             <button type="submit-button">Submit</button>
             <div>Or look into the <a href="/database">database</a></div>
-            <div>To see alerts click <a href="/alerts">here</a></div>
+            <div>There are {{nAlerts}} active alerts: <a href="/alerts">details</a></div>
         </form>
 
         <div id="target_div"></div>
@@ -106,18 +106,13 @@
     }
 
     async function requestData() {
-        socket.emit("join","this is supposed to be optional but doesnt work without it");
+        socket.emit("join",getCookie("farm"));
     }
 	document.addEventListener('DOMContentLoaded', function () {
         socket= io();
         socket.on("liveData", ( data ) => {
             console.log('Raw data from server:', data);
             data=JSON.parse(data);
-            const farm = getCookie("farm");
-            console.log(farm+" and "+data["FarmID"]);
-            if(farm == "" || data.FarmID!=farm){
-                return;
-            }
             // Check if the new point is different from the last point
             const lastPoint = chart.series[0].data[chart.series[0].data.length - 1];
             const newPoint = [data.date, data.Power]
@@ -131,7 +126,9 @@
                 console.log('New point is the same as the last point. Skipping addition.');
             }
             //This should only execute with live data so let's update the table values
-            document.getElementById("performance-data").innerHTML = (data.Power/data.predict_power*100).toFixed(4).toString()+"%";
+            if(data.predict_power==0){
+                document.getElementById("performance-data").innerHTML = "---"
+            }else document.getElementById("performance-data").innerHTML = (data.Power/data.predict_power*100).toFixed(4).toString()+"%";
             document.getElementById("intensity-data").innerHTML = data.Intensity.toString();
             document.getElementById("voltage-data").innerHTML = data.Voltage.toString();
             document.getElementById("production-data").innerHTML = data.Power.toString();

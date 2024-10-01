@@ -49,10 +49,12 @@
             </select>
             <button type="submit-button">Submit</button>
             <div>Or look into the <a href="/database">database</a></div>
+            <div>There are {{nAlerts}} active alerts: <a href="/alerts">details</a></div>
         </form>
         <div id="chart-container"></div>
 
         <div class="data-section">
+            <div class="data-item">Day of max/min power: <span id="max-min-power">N/A</span></div>
             <div class="data-item">Day of max/min irradiance: <span id="max-min-irradiance">N/A</span></div>
             <div class="data-item">Day of max/min cell temperature: <span id="max-min-temperature">N/A</span></div>
             <div class="data-item">Voltage: <span id="voltage-data">Max: N/A, Min: N/A, Mean: N/A</span></div>
@@ -103,13 +105,13 @@
                         text: 'Total KWh'
                     }
                 },
-                series: {{MonthData|safe}}
+                series: {{MonthData|safe}}//Can be parsed by client :)
             });
             //Now fill up the table with the raw data
             var data={{wholedata|safe}}
             //Calculate the proper stats and also plot the whole data in the table
             const tbody = document.getElementById('data-table-body');
-            var maxIrr=minIrr=maxTem=minTem=maxVol=minVol=meanVol=maxInt=minInt=meanInt=num=0
+            var maxPow=minPow=maxIrr=minIrr=maxTem=minTem=maxVol=minVol=meanVol=maxInt=minInt=meanInt=num=1
             var date;
             let numday;
             data.forEach(row => {
@@ -125,35 +127,39 @@
                     td.textContent = row[i].toFixed(5); // Float values
                     tr.appendChild(td);
                     switch (i){
+                        case 2:
+                            if(data[maxPow-1][i]<row[i]) maxPow=numday;
+                            if(data[minPow-1][i]>row[i]) minPow=numday;
+                        break;
                         case 3:
-                            if(maxIrr==0 || maxIrr<row[i]) maxIrr=numday;
+                            if(data[maxIrr-1][i]<row[i]) maxIrr=numday;
                         break;
                         case 4:
-                            if(minIrr==0 || minIrr>row[i]) minIrr=numday;
+                            if(data[minIrr-1][i]>row[i]) minIrr=numday;
                         break;
                         case 6:
-                            if(maxTem==0 || maxTem<row[i]) maxTem=numday;
+                            if(data[maxTem-1][i]<row[i]) maxTem=numday;
                         break;
                         case 7:
-                            if(minTem==0 || minTem>row[i]) minTem=numday;
-                        break;
-                        case 8:
-                            meanInt+=row[i];
+                            if(data[minTem-1][i]>row[i]) minTem=numday;
                         break;
                         case 9:
-                            if(maxInt==0 || maxInt<row[i]) maxInt=row[i];
+                            meanInt+=row[i];
                         break;
                         case 10:
-                            if(minInt==0 || minInt>row[i]) minInt=row[i];
+                            if(maxInt==1 || maxInt<row[i]) maxInt=row[i];
                         break;
                         case 11:
-                            meanVol+=row[i];
+                            if(minInt==1 || minInt>row[i]) minInt=row[i];
                         break;
                         case 12:
-                            if(maxVol==0 || maxVol<row[i]) maxVol=row[i];
+                            meanVol+=row[i];
                         break;
                         case 13:
-                            if(minVol==0 || minVol>row[i]) minVol=row[i];
+                            if(maxVol==1 || maxVol<row[i]) maxVol=row[i];
+                        break;
+                        case 14:
+                            if(minVol==1 || minVol>row[i]) minVol=row[i];
                         break;
                     }
                 }
@@ -161,6 +167,7 @@
                 tbody.appendChild(tr);
             });
             //Set the monthly stats
+            document.getElementById('max-min-power').textContent = `Max: ${maxPow}, Min: ${minPow}`;
             document.getElementById('max-min-irradiance').textContent = `Max: ${maxIrr}, Min: ${minIrr}`;
             document.getElementById('max-min-temperature').textContent = `Max: ${maxTem}, Min: ${minTem}`;
             document.getElementById('voltage-data').textContent = `Max: ${maxVol}, Min: ${minVol}, Mean: ${meanVol/num}`;

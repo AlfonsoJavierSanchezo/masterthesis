@@ -1,60 +1,288 @@
-<!--Estaría guay meter selectores para las fechas "desde" y "hasta" y para la granja solar. Por ultimo un boton de generar tabla para que se genere, obviamente.Después de generar la tabla, debajo de ésta, volverán a aparecer los botones y nos dejará volver a generar una tabla, para poder comparar de forma rápida-->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Data Input Form</title>
+    <title>Data Visualization with Date Selectors</title>
     <style>
-        .radio-group {
-            margin-bottom: 15px;
+        body {
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            margin: 20px;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        #chart-container1, #chart-container2 {
+            width: 100%;
+            height: 400px;
+            border: 1px solid #ccc;
+            margin-bottom: 20px;
+        }
+        .data-section {
+            margin-top: 20px;
+        }
+        .data-item {
+            margin-bottom: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 10px;
+            text-align: center;
         }
     </style>
     <script src="https://code.highcharts.com/highcharts.js"></script>
 </head>
 <body>
-    <h1>Insert the data for the database search</h1>
-    <form action="/database" method="POST">
-        <div class="radio-group">
-            <label>
-                <input type="radio" name="date-range" value="last-month" onclick="toggleDateSelectors(true)">
-                Last Month
-            </label><br>
-            <label>
-                <input type="radio" name="date-range" value="last-2-months" onclick="toggleDateSelectors(true)">
-                Last 2 Months
-            </label><br>
-            <label>
-                <input type="radio" name="date-range" value="" checked onclick="toggleDateSelectors(false)">
-                None
-            </label>
-        </div>
+    <div class="container">
+        <form class="controls" id="data-form">
+            <label for="Day">Day:</label>
+            <input type="date" id="Day" name="Day">
+            
+            <label for="month">Month:</label>
+            <input type="month" id="month" name="month">
+            
+            <label for="farm">Farm:</label>
+            <select id="farm" name="farm">
+                {% for farm in farms %}
+	            <option value="{{farm}}">{{farm|safe}}</option>
+	            {% endfor %}
+            </select>
+            
+            <button type="submit">Submit</button>
+            <div>There are {{nAlerts}} active alerts: <a href="/alerts">details</a></div>
+        </form>
 
-        <label for="start-date">Start Date:</label>
-        <input type="date" id="start-date" name="start-date" required><br><br>
+        <div id="day-chart"></div>
 
-        <label for="end-date">End Date:</label>
-        <input type="date" id="end-date" name="end-date" required><br><br>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>PowerSum</th>
+                    <th>PredPowerSum</th>
+                    <th>IrradianceMean</th>
+                    <th>IrradianceMax</th>
+                    <th>IrradianceMin</th>
+                    <th>PanelTemperatureMean</th>
+                    <th>PanelTemperatureMax</th>
+                    <th>PanelTemperatureMin</th>
+                    <th>IntensityMean</th>
+                    <th>IntensityMax</th>
+                    <th>IntensityMin</th>
+                    <th>VoltageMean</th>
+                    <th>VoltageMax</th>
+                    <th>VoltageMin</th>
+                </tr>
+            </thead>
+            <tbody id="dayTable">
+                <!-- Data rows will be inserted here by JavaScript -->
+            </tbody>
+        </table>
 
-        <label for="options">Select a farm to filter with:</label>
-        <select id="options" name="options" required>
-	    {% for farm in farms %}
-	    <option value="{{farm}}">{{farm|safe}}</option>
-	    {% endfor %}
-        </select><br><br>
+        <div id="month-chart"></div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>PowerSum</th>
+                    <th>PredPowerSum</th>
+                    <th>IrradianceMean</th>
+                    <th>IrradianceMax</th>
+                    <th>IrradianceMin</th>
+                    <th>PanelTemperatureMean</th>
+                    <th>PanelTemperatureMax</th>
+                    <th>PanelTemperatureMin</th>
+                    <th>IntensityMean</th>
+                    <th>IntensityMax</th>
+                    <th>IntensityMin</th>
+                    <th>VoltageMean</th>
+                    <th>VoltageMax</th>
+                    <th>VoltageMin</th>
+                </tr>
+            </thead>
+            <tbody id="monthTable">
+                <!-- Data rows will be inserted here by JavaScript -->
+            </tbody>
+        </table>
+    </div>
 
-        <input type="submit" value="Submit">
-    </form>
-    <div id="target_div" style="width:100%; height:400px;"></div>
-{{errormsg|safe}}
     <script>
-        function toggleDateSelectors(disable) {
-            document.getElementById('start-date').disabled = disable;
-            document.getElementById('end-date').disabled = disable;
-        }
-    </script>
-    <script>
-	{{graph|safe}}
+        let monthChart;
+        let dayChart;
+        document.getElementById('data-form').addEventListener('submit', async function(event) {
+            event.preventDefault(); // Prevent the default form submission
+            // Collect form data
+            const dayVal = document.getElementById('Day').value;
+            const monthVal = document.getElementById('month').value;
+            const farmVal = document.getElementById('farm').value;
+            if (dayVal!="" && farmVal!=null){
+                let data=new FormData();
+                data.append('Day',dayVal);
+                data.append('Farm', farmVal);
+                        
+                let result = await fetch('/solardata_day',{
+                    method: "POST",
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({"Day": dayVal,"Farm": farmVal})
+                });
+                if(result.ok){
+                    const data = await result.json();
+                    console.log(data)
+                    let newseries=[];
+                    let newseriesPred=[];
+                    for (const point of data) {
+                        let d= Date.parse(point['date']);
+                        let n= parseFloat(point['Power'])
+                        let pn=parseFloat(point['predict_power'])
+                        newseries.push([d,n])
+                        newseriesPred.push([d,pn])
+                    }
+                    dayChart.addSeries({
+                        name: farmVal+" "+dayVal,
+                        data: newseries
+                    });
+                    dayChart.addSeries({
+                        name: farmVal+" "+dayVal+"Pred",
+                        data: newseriesPred
+                    });
+                    
+                    dayChart.redraw();
+                }else{
+                    console.log('Bad response while getting tay chart data');
+                }
+                result="";
+                result = await fetch('/aggregated_day/single',{
+                    method: "POST",
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({"Day": dayVal,"Farm": farmVal})
+                });
+                if(result.ok){
+                    const data = await result.json();
+                    const tr = document.createElement('tr');
+                    for(let i=1;i<data.length-1;i++){
+                        const td = document.createElement('td');
+                        td.textContent = data[i];
+                        tr.appendChild(td);
+                    }
+                    const table = document.getElementById("dayTable");
+                    table.appendChild(tr);
+                    
+                }
+            }
+            if (monthVal!="" && farmVal!=null){
+                result = await fetch('/aggregated_day/month',{
+                    method: "POST",
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({"Month": monthVal,"Farm": farmVal})
+                });
+                if(result.ok){
+                    const data = await result.json();
+                    let array=[]
+                    let PredArray=[]
+                    for(let i=1;i<32;i++){
+                        let value=0
+                        let valuePred=0
+                        for(let j=0;j<data.length-1;j++){
+                            date= new Date(data[j]['date'])
+                            if(date.getUTCDate() == i){
+                                value=Number(data[j]['PowerSum'])
+                                valuePred=Number(data[j]['predPowerSum'])
+                            }
+                        }
+                        array.push(value)
+                        PredArray.push(valuePred)
+                    }
+                    monthChart.addSeries({
+                        name: farmVal+" "+dayVal,
+                        data: array
+                    });
+                    monthChart.addSeries({
+                        name: farmVal+" "+dayVal+"Pred",
+                        data: PredArray
+                    });
+                    monthChart.redraw()
+                }
+                result="";
+                result = await fetch('/aggregated_month',{
+                    method: "POST",
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({"Month": monthVal,"Farm": farmVal})
+                });
+                if(result.ok){
+                    const data = await result.json();
+                    const tr = document.createElement('tr');
+                    for(let i=1;i<data.length-1;i++){
+                        const td = document.createElement('td');
+                        td.textContent = data[i];
+                        tr.appendChild(td);
+                    }
+                    const table = document.getElementById("monthTable");
+                    table.appendChild(tr);
+                    
+                }
+            }
+            // Handle the form data (e.g., send it to the server, update the charts)
+            console.log('Day:', dayVal);
+            console.log('Month:', monthVal);
+            console.log('Farm:', farmVal);
+
+            // Add your logic here to handle the form data and update the charts and tables
+        });
+
+        document.addEventListener('DOMContentLoaded', function() {
+            monthChart =Highcharts.chart('month-chart', {
+                chart: {
+                type: 'column'
+                },
+                title: {
+                    text: 'Monthly stats'
+                },
+                xAxis: {
+                    categories: ['1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22','23','24','25','26','27','28','29','30','31'],
+                },
+                yAxis: {
+                    min: 0,
+                    title: {
+                        text: 'Total KWh'
+                    }
+                },
+                series: []
+            });
+            
+            dayChart= Highcharts.chart('day-chart', {
+                chart: {
+                    type: 'line',
+                },
+                title: {
+                    text: 'Daily stats'
+                },
+                xAxis: {
+                    type: 'datetime',
+                    title: {
+                        text: 'Datetime'
+                    },
+                    dateTimeLabelFormats: {
+                                minute: '%H:%M',
+                                hour: '%H:%M'
+                            }
+                },
+                yAxis: {
+                    title: {
+                        text: 'KWatts'
+                    }
+                },
+                series: []
+            });
+        });
+
     </script>
 </body>
 </html>

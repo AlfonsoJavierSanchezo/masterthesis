@@ -81,7 +81,7 @@ def aggregateValues(data,dayormonth):
                     farms[i][1]['PanelTemperatureMean']=farm[1]['PanelTemperatureMean']+data['PanelTemperature']
                     farms[i][1]['PanelTemperatureMax']=maxf(farm[1]['PanelTemperatureMax'],data['PanelTemperature'])
                     farms[i][1]['PanelTemperatureMin']=minf(farm[1]['PanelTemperatureMin'],data['PanelTemperature'])
-                    farms[i][1]['NumVTemp']=farm[1]['NumTemp']+1
+                    farms[i][1]['NumTemp']=farm[1]['NumTemp']+1
                 if data['Intensity']!=0:
                     farms[i][1]['IntensityMean']=farm[1]['IntensityMean']+data['Intensity']
                     farms[i][1]['IntensityMax']=maxf(farm[1]['IntensityMax'],data['Intensity'])
@@ -174,6 +174,7 @@ def deactivateAlert(alertType, farmID):
         cursor.execute(query,data)
         cursor.execute(query2,data)
         sql.commit()
+        sio.emit("deactivateAlert",{"alertType":alertType,"FarmID":farmID})
     except Exception as e:
         print(f"ErrorF: "+repr(e))
         sql.rollback()
@@ -195,6 +196,7 @@ def sendAlert(alertType, rawData):
         data.append(rawData["date"])
         cursor.execute(query2,data)
         sql.commit()
+        sio.emit("activateAlert",{"alertType":alertType,"FarmID":rawData["FarmID"],"date":rawData["date"]})
     except Exception as e:
         print(f"ErrorF: "+repr(e))
         print("Alarm not saved")
@@ -239,7 +241,7 @@ def write_to_sql(df, batchID):
         #If we're at night, the power might be too low to take correct predictions and send alarms
         if formatted['Power']>0.2:
             perc=getPowerRelation(formatted['Power'],formatted['predict_power'])
-            if perc<0.25:
+            if perc>0.25:
                 sendAlert(alertType.LowPower.value,formatted)
             else:
                 deactivateAlert(alertType.LowPower.value,formatted['FarmID'])

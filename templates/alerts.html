@@ -7,7 +7,12 @@
     <!-- Highcharts library -->
     <script src="https://code.highcharts.com/highcharts.js"></script>
     <style>
-        #charts {
+        #activeAlerts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px; /* Space between charts */
+        }
+        #solvedAlerts {
             display: flex;
             flex-wrap: wrap;
             gap: 20px; /* Space between charts */
@@ -126,6 +131,8 @@
                 if(solvedAlertData===undefined || solvedAlertData.length==0){
                     const chartsDiv = document.getElementById('solvedAlerts');
                     chartsDiv.innerHTML = 'No alerts received yet';
+                }else{
+                    generateCharts(solvedAlertData,'solvedAlerts');
                 }
                 return;
             }
